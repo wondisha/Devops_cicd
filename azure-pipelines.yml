@@ -7,8 +7,8 @@ pool:
   name: 'Default'
 
 variables:
-  testSqlInstance: 'YourTestServerName'  # Replace with your test SQL Server
-  prodSqlInstance: 'YourProdServerName'  # Replace with your prod SQL Server
+  testSqlInstance: 'techpc'  # Replace with your test SQL Server
+  prodSqlInstance: 'techpc'  # Replace with your prod SQL Server
   scriptPath: '$(Build.SourcesDirectory)/scripts/releases'
 
 stages:
