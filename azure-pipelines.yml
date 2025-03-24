@@ -21,45 +21,45 @@ stages:
       - job: ValidateScripts
         timeoutInMinutes: 10
         steps:
-          - powershell: |
-              Write-Host "Debug: Checking variables"
-              Write-Host "SqlUsername: $(SqlUsername)"
-              Write-Host "SqlPassword: [REDACTED]"
-            displayName: 'Debug Variables'
-          - powershell: |
-              Write-Host "SqlUsername: $(SqlUsername)"
-              Write-Host "SqlPassword: [REDACTED]"
-              # Monitor memory usage
-              $memory = Get-CimInstance Win32_OperatingSystem
-              $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
-              Write-Host "Free memory: $freeMemoryPercent%"
-              if ($freeMemoryPercent -lt 5) {
-                Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
-                exit 1
-              }
+          - - powershell: |
+    Write-Host "Debug: Checking variables"
+    Write-Host "SqlUsername: $(SqlUsername)"
+    Write-Host "SqlPassword: [REDACTED]"
+  displayName: 'Debug Variables'
+- powershell: |
+    Write-Host "SqlUsername: $(SqlUsername)"
+    Write-Host "SqlPassword: [REDACTED]"
+    # Monitor memory usage
+    $memory = Get-CimInstance Win32_OperatingSystem
+    $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+    Write-Host "Free memory: $freeMemoryPercent%"
+    if ($freeMemoryPercent -lt 3) {
+      Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+      exit 1
+    }
 
-              # Ensure dbatools is installed
-              if (-not (Get-Module -ListAvailable -Name dbatools)) {
-                Install-Module -Name dbatools -Force -Scope CurrentUser
-              }
+    # Ensure dbatools is installed
+    if (-not (Get-Module -ListAvailable -Name dbatools)) {
+      Install-Module -Name dbatools -Force -Scope CurrentUser
+    }
 
-              # Create credential object
-              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+    # Create credential object
+    $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
 
-              # Process scripts one at a time
-              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
-              foreach ($script in $scripts) {
-                Write-Host "Validating: $script"
-                try {
-                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException -TrustServerCertificate
-                }
-                catch {
-                  Write-Error "Failed to validate $script : $_"
-                  throw
-                }
-                [System.GC]::Collect()
-              }
-            displayName: 'Validate Scripts'
+    # Process scripts one at a time
+    $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+    foreach ($script in $scripts) {
+      Write-Host "Validating: $script"
+      try {
+        Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException -TrustServerCertificate
+      }
+      catch {
+        Write-Error "Failed to validate $script : $_"
+        throw
+      }
+      [System.GC]::Collect()
+    }
+  displayName: 'Validate Scripts'
           - task: PublishBuildArtifacts@1
             inputs:
               pathToPublish: '$(scriptPath)'
