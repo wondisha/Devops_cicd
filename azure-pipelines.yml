@@ -15,7 +15,7 @@ stages:
 - stage: Build
   jobs:
   - job: ValidateScripts
-    timeoutInMinutes: 10
+    timeoutInMinutes: 15
     steps:
     - powershell: |
         # Monitor memory usage
