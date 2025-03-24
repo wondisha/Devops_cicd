@@ -5,8 +5,8 @@ pool:
   name: 'Default'
 
 variables:
-  - group: SqlCreds  # Variable Group
-  - name: testSqlInstance  # Key-value pairs as list items
+  - group: SqlCreds
+  - name: testSqlInstance
     value: 'techpc'
   - name: prodSqlInstance
     value: 'YourProdServerName'
@@ -22,14 +22,20 @@ stages:
         timeoutInMinutes: 10
         steps:
           - powershell: |
-             Write-Host "SqlUsername: $(SqlUsername)"
-             Write-Host "SqlPassword: [REDACTED]"  # Don't print the actual password
+              Write-Host "Debug: Checking variables"
+              Write-Host "SqlUsername: $(SqlUsername)"
+              Write-Host "SqlPassword: [REDACTED]"
+            displayName: 'Debug Variables'
+          - powershell: |
+              Write-Host "SqlUsername: $(SqlUsername)"
+              Write-Host "SqlPassword: [REDACTED]"
               # Monitor memory usage
               $memory = Get-CimInstance Win32_OperatingSystem
               $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
               Write-Host "Free memory: $freeMemoryPercent%"
               if ($freeMemoryPercent -lt 5) {
-                Write-Warning "Low memory detected! Free memory: $freeMemoryPercent%"
+                Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+                exit 1
               }
 
               # Ensure dbatools is installed
