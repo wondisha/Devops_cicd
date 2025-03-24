@@ -1,97 +1,54 @@
 trigger:
-  branches:
-    include:
-      - main
+- master
 
 pool:
   name: 'Default'
 
 variables:
-  testSqlInstance: 'techpc'  # Replace with your test SQL Server
-  prodSqlInstance: 'techpc'  # Replace with your prod SQL Server
+  - group: SqlCreds
+  testSqlInstance: 'techpc'
+  prodSqlInstance: 'YourProdServerName'
   scriptPath: '$(Build.SourcesDirectory)/scripts/releases'
+  system.debug: true
 
 stages:
 - stage: Build
-  displayName: 'Build and Validate'
   jobs:
   - job: ValidateScripts
+    timeoutInMinutes: 10
     steps:
-    - task: PowerShell@2
-      displayName: 'Install dbatools'
-      inputs:
-        targetType: 'inline'
-        script: |
+    - powershell: |
+        # Monitor memory usage
+        $memory = Get-CimInstance Win32_OperatingSystem
+        $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+        Write-Host "Free memory: $freeMemoryPercent%"
+        if ($freeMemoryPercent -lt 5) {
+          Write-Warning "Low memory detected! Free memory: $freeMemoryPercent%"
+        }
+
+        # Ensure dbatools is installed
+        if (-not (Get-Module -ListAvailable -Name dbatools)) {
           Install-Module -Name dbatools -Force -Scope CurrentUser
-          Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
-          Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register 
-    - task: PowerShell@2
-      displayName: 'Validate Scripts'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
-          foreach ($script in $scripts) {
-            Write-Host "Validating: $script"
-            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName  -EnableException
+        }
+
+        # Create credential object
+        $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+
+        # Process scripts one at a time
+        $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+        foreach ($script in $scripts) {
+          Write-Host "Validating: $script"
+          try {
+            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException -TrustServerCertificate
           }
+          catch {
+            Write-Error "Failed to validate $script : $_"
+            throw
+          }
+          [System.GC]::Collect()
+        }
+      displayName: 'Validate Scripts'
     - task: PublishBuildArtifacts@1
-      displayName: 'Publish Scripts'
       inputs:
         pathToPublish: '$(scriptPath)'
         artifactName: 'sql-scripts'
-        publishLocation: 'Container'
-
-- stage: DeployDev
-  displayName: 'Deploy to Dev'
-  dependsOn: Build
-  condition: succeeded()
-  jobs:
-  - job: Deploy
-    steps:
-    - task: DownloadBuildArtifacts@1
-      displayName: 'Download Scripts'
-      inputs:
-        artifactName: 'sql-scripts'
-        downloadPath: '$(System.ArtifactsDirectory)'
-    - task: PowerShell@2
-      displayName: 'Deploy to Dev'
-      inputs:
-        targetType: 'inline'
-        script: |
-          Install-Module -Name dbatools -Force -Scope CurrentUser
-          Backup-DbaDatabase -SqlInstance "$(testSqlInstance)" -Path "C:\Backups" -Type Full
-          $scripts = Get-ChildItem -Path "$(System.ArtifactsDirectory)/sql-scripts" -Filter "*.sql" | Sort-Object Name
-          foreach ($script in $scripts) {
-            Write-Host "Deploying: $script"
-            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName  -EnableException
-          }
-
-- stage: DeployProd
-  displayName: 'Deploy to Prod'
-  dependsOn: DeployDev
-  condition: succeeded()
-  jobs:
-  - deployment: Deploy
-    environment: 'Production'  # Creates an approval gate
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - task: DownloadBuildArtifacts@1
-            displayName: 'Download Scripts'
-            inputs:
-              artifactName: 'sql-scripts'
-              downloadPath: '$(System.ArtifactsDirectory)'
-          - task: PowerShell@2
-            displayName: 'Deploy to Prod'
-            inputs:
-              targetType: 'inline'
-              script: |
-                Install-Module -Name dbatools -Force -Scope CurrentUser
-                Backup-DbaDatabase -SqlInstance "$(prodSqlInstance)" -Path "C:\Backups" -Type Full
-                $scripts = Get-ChildItem -Path "$(System.ArtifactsDirectory)/sql-scripts" -Filter "*.sql" | Sort-Object Name
-                foreach ($script in $scripts) {
-                  Write-Host "Deploying: $script"
-                  Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -File $script.FullName  -EnableException
-                }
