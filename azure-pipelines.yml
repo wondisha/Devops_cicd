@@ -28,7 +28,7 @@ stages:
 
         # Ensure dbatools is installed
         if (-not (Get-Module -ListAvailable -Name dbatools)) {
-          Install-Module -Name dbatools -Force -Scope CurrentUser
+           Install-Module -Name dbatools -Force -Scope CurrentUser
         }
 
         # Create credential object
