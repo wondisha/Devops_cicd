@@ -4,7 +4,7 @@ trigger:
       - main
 
 pool:
-  vmImage: 'windows-latest'
+  name: 'Default'
 
 variables:
   testSqlInstance: 'YourTestServerName'  # Replace with your test SQL Server
