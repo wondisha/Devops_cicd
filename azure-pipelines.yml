@@ -23,6 +23,8 @@ stages:
         targetType: 'inline'
         script: |
           Install-Module -Name dbatools -Force -Scope CurrentUser
+          Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+          Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register 
     - task: PowerShell@2
       displayName: 'Validate Scripts'
       inputs:
