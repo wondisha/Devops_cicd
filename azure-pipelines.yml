@@ -1,54 +1,58 @@
 trigger:
-- master
+  - master
 
 pool:
   name: 'Default'
 
 variables:
-  - group: SqlCreds
-  testSqlInstance: 'techpc'
-  prodSqlInstance: 'YourProdServerName'
-  scriptPath: '$(Build.SourcesDirectory)/scripts/releases'
-  system.debug: true
+  - group: SqlCreds  # Variable Group
+  - name: testSqlInstance  # Key-value pairs as list items
+    value: 'techpc'
+  - name: prodSqlInstance
+    value: 'YourProdServerName'
+  - name: scriptPath
+    value: '$(Build.SourcesDirectory)/scripts/releases'
+  - name: system.debug
+    value: true
 
 stages:
-- stage: Build
-  jobs:
-  - job: ValidateScripts
-    timeoutInMinutes: 15
-    steps:
-    - powershell: |
-        # Monitor memory usage
-        $memory = Get-CimInstance Win32_OperatingSystem
-        $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
-        Write-Host "Free memory: $freeMemoryPercent%"
-        if ($freeMemoryPercent -lt 5) {
-          Write-Warning "Low memory detected! Free memory: $freeMemoryPercent%"
-        }
+  - stage: Build
+    jobs:
+      - job: ValidateScripts
+        timeoutInMinutes: 10
+        steps:
+          - powershell: |
+              # Monitor memory usage
+              $memory = Get-CimInstance Win32_OperatingSystem
+              $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+              Write-Host "Free memory: $freeMemoryPercent%"
+              if ($freeMemoryPercent -lt 5) {
+                Write-Warning "Low memory detected! Free memory: $freeMemoryPercent%"
+              }
 
-        # Ensure dbatools is installed
-        if (-not (Get-Module -ListAvailable -Name dbatools)) {
-           Install-Module -Name dbatools -Force -Scope CurrentUser
-        }
+              # Ensure dbatools is installed
+              if (-not (Get-Module -ListAvailable -Name dbatools)) {
+                Install-Module -Name dbatools -Force -Scope CurrentUser
+              }
 
-        # Create credential object
-        $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              # Create credential object
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
 
-        # Process scripts one at a time
-        $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
-        foreach ($script in $scripts) {
-          Write-Host "Validating: $script"
-          try {
-            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException -TrustServerCertificate
-          }
-          catch {
-            Write-Error "Failed to validate $script : $_"
-            throw
-          }
-          [System.GC]::Collect()
-        }
-      displayName: 'Validate Scripts'
-    - task: PublishBuildArtifacts@1
-      inputs:
-        pathToPublish: '$(scriptPath)'
-        artifactName: 'sql-scripts'
+              # Process scripts one at a time
+              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              foreach ($script in $scripts) {
+                Write-Host "Validating: $script"
+                try {
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException -TrustServerCertificate
+                }
+                catch {
+                  Write-Error "Failed to validate $script : $_"
+                  throw
+                }
+                [System.GC]::Collect()
+              }
+            displayName: 'Validate Scripts'
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: '$(scriptPath)'
+              artifactName: 'sql-scripts'
