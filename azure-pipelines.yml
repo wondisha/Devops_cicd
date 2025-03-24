@@ -22,6 +22,8 @@ stages:
         timeoutInMinutes: 10
         steps:
           - powershell: |
+             Write-Host "SqlUsername: $(SqlUsername)"
+             Write-Host "SqlPassword: [REDACTED]"  # Don't print the actual password
               # Monitor memory usage
               $memory = Get-CimInstance Win32_OperatingSystem
               $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
