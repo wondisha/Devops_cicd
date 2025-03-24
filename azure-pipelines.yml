@@ -31,7 +31,7 @@ stages:
           $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
           foreach ($script in $scripts) {
             Write-Host "Validating: $script"
-            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -EnableException
+            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -TrustServerCertificate -EnableException
           }
     - task: PublishBuildArtifacts@1
       displayName: 'Publish Scripts'
@@ -62,7 +62,7 @@ stages:
           $scripts = Get-ChildItem -Path "$(System.ArtifactsDirectory)/sql-scripts" -Filter "*.sql" | Sort-Object Name
           foreach ($script in $scripts) {
             Write-Host "Deploying: $script"
-            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -EnableException
+            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -TrustServerCertificate -EnableException
           }
 
 - stage: DeployProd
@@ -91,5 +91,5 @@ stages:
                 $scripts = Get-ChildItem -Path "$(System.ArtifactsDirectory)/sql-scripts" -Filter "*.sql" | Sort-Object Name
                 foreach ($script in $scripts) {
                   Write-Host "Deploying: $script"
-                  Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -File $script.FullName -EnableException
+                  Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -File $script.FullName -TrustServerCertificate -EnableException
                 }
