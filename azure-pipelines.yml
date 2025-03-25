@@ -21,54 +21,66 @@ stages:
       - job: ValidateScripts
         timeoutInMinutes: 10
         steps:
-         - powershell: |
-    Write-Host "SqlUsername: $(SqlUsername)"
-    Write-Host "SqlPassword: [REDACTED]"
-    # Monitor memory usage
-    $memory = Get-CimInstance Win32_OperatingSystem
-    $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
-    Write-Host "Free memory: $freeMemoryPercent%"
-    if ($freeMemoryPercent -lt 3) {
-      Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
-      exit 1
-    }
+          - powershell: |
+              Write-Host "Current working directory: $PWD"
+              Write-Host "Listing files in $(Build.SourcesDirectory):"
+              Get-ChildItem -Path "$(Build.SourcesDirectory)"
+            displayName: 'List Files in Sources Directory'
+          - powershell: |
+              Write-Host "Listing environment variables:"
+              Get-ChildItem env: | Where-Object { $_.Name -like "*SQL*" }
+            displayName: 'List Environment Variables'
+          - powershell: '.\debug-variables.ps1'
+            displayName: 'Debug Variables'
+            workingDirectory: '$(Build.SourcesDirectory)'
+          - powershell: |
+              Write-Host "SqlUsername: $(SqlUsername)"
+              Write-Host "SqlPassword: [REDACTED]"
+              # Monitor memory usage
+              $memory = Get-CimInstance Win32_OperatingSystem
+              $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+              Write-Host "Free memory: $freeMemoryPercent%"
+              if ($freeMemoryPercent -lt 3) {
+                Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+                exit 1
+              }
 
-    # Ensure dbatools is installed
-    Write-Host "Checking dbatools version..."
-    $currentModules = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending
-    if ($currentModules) {
-      Write-Host "Current dbatools versions installed:"
-      $currentModules | ForEach-Object { Write-Host "Version: $($_.Version) at $($_.ModuleBase)" }
-    } else {
-      Write-Host "dbatools not found, installing..."
-      Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -ErrorAction Stop
-    }
-    Import-Module -Name dbatools -Force -ErrorAction Stop
-    $loadedModule = Get-Module -Name dbatools
-    Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
+              # Ensure dbatools is installed
+              Write-Host "Checking dbatools version..."
+              $currentModules = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending
+              if ($currentModules) {
+                Write-Host "Current dbatools versions installed:"
+                $currentModules | ForEach-Object { Write-Host "Version: $($_.Version) at $($_.ModuleBase)" }
+              } else {
+                Write-Host "dbatools not found, installing..."
+                Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -ErrorAction Stop
+              }
+              Import-Module -Name dbatools -Force -ErrorAction Stop
+              $loadedModule = Get-Module -Name dbatools
+              Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
 
-    # Configure dbatools to trust the SQL Server certificate and disable encryption
-    Write-Host "Configuring dbatools to trust SQL Server certificate..."
-    Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
-    Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+              # Configure dbatools to trust the SQL Server certificate and disable encryption
+              Write-Host "Configuring dbatools to trust SQL Server certificate..."
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
 
-    # Create credential object
-    $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              # Create credential object
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
 
-    # Process scripts one at a time
-    $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
-    foreach ($script in $scripts) {
-      Write-Host "Validating: $script"
-      try {
-        Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException
-      }
-      catch {
-        Write-Error "Failed to validate $script : $_"
-        throw
-      }
-      [System.GC]::Collect()
-    }
-  displayName: 'Validate Scripts'
+              # Process scripts one at a time
+              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              foreach ($script in $scripts) {
+                Write-Host "Validating: $script"
+                try {
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException
+                }
+                catch {
+                  Write-Error "Failed to validate $script : $_"
+                  throw
+                }
+                [System.GC]::Collect()
+              }
+            displayName: 'Validate Scripts'
           - task: PublishBuildArtifacts@1
             inputs:
               pathToPublish: '$(scriptPath)'
