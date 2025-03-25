@@ -48,6 +48,20 @@ stages:
               Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
             displayName: 'Update dbatools'
           - powershell: |
+              Write-Host "Cleaning up database by dropping the Test object..."
+              # Configure dbatools to trust the SQL Server certificate and disable encryption
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              $dropQuery = @"
+              IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Test]') AND type in (N'U'))
+              BEGIN
+                  DROP TABLE [dbo].[Test];
+              END
+              "@
+              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+            displayName: 'Clean Up Database'
+          - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
               Write-Host "SqlPassword: [REDACTED]"
               # Monitor memory usage
