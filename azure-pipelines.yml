@@ -79,4 +79,113 @@ stages:
 
               # Create the database with explicit file locations
               Write-Host "Creating ValidationDB database..."
-              $createQuery = "CREATE DATABASE ValidationDB ON (NAME = ValidationDB, FILENAME = 'D:\SQLData
+              $createQuery = "CREATE DATABASE ValidationDB ON (NAME = ValidationDB, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf') LOG ON (NAME = ValidationDB_log, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf')"
+              try {
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
+                  Write-Host "ValidationDB database created successfully."
+              }
+              catch {
+                  Write-Error "Failed to create ValidationDB database: $_"
+                  throw "Failed to create ValidationDB: $_"
+              }
+
+              # Verify the database exists
+              Write-Host "Verifying ValidationDB database exists..."
+              $checkQuery = "SELECT name FROM sys.databases WHERE name = 'ValidationDB'"
+              $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $checkQuery -SqlCredential $cred -EnableException
+              if ($result -and $result.name -eq 'ValidationDB') {
+                  Write-Host "ValidationDB database exists: $($result.name)"
+              }
+              else {
+                  Write-Error "ValidationDB database was not created successfully!"
+                  throw "Database creation verification failed: ValidationDB not found"
+              }
+            displayName: 'Create Validation Database'
+          - powershell: |
+              Write-Host "Pausing pipeline for 5 minutes to allow manual verification of ValidationDB..."
+              Start-Sleep -Seconds 300
+            displayName: 'Pause for Verification'
+          - powershell: |
+              Write-Host "SqlUsername: $(SqlUsername)"
+              Write-Host "SqlPassword: [REDACTED]"
+              # Monitor memory usage
+              $memory = Get-CimInstance Win32_OperatingSystem
+              $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+              Write-Host "Free memory: $freeMemoryPercent%"
+              if ($freeMemoryPercent -lt 3) {
+                  Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+                  exit 1
+              }
+
+              # Ensure dbatools is loaded
+              Import-Module -Name dbatools -Force -ErrorAction Stop
+              $loadedModule = Get-Module -Name dbatools
+              Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
+
+              # Configure dbatools to trust the SQL Server certificate and disable encryption
+              Write-Host "Configuring dbatools to trust SQL Server certificate..."
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+
+              # Create credential object
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+
+              # Verify connection to ValidationDB
+              Write-Host "Verifying connection to ValidationDB..."
+              $checkQuery = "SELECT DB_NAME() AS CurrentDatabase;"
+              $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -Query $checkQuery -SqlCredential $cred -EnableException
+              Write-Host "Connected to database: $($result.CurrentDatabase)"
+
+              # Process scripts one at a time
+              Write-Host "Looking for scripts in $(scriptPath)..."
+              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              if (-not $scripts) {
+                  Write-Error "No .sql files found in $(scriptPath)! At least one script is required."
+                  throw "No scripts found to validate"
+              }
+              Write-Host "Found $($scripts.Count) script(s):"
+              $scripts | ForEach-Object { Write-Host $_.Name }
+              foreach ($script in $scripts) {
+                  Write-Host "Validating: $script"
+                  try {
+                      Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -File $script.FullName -SqlCredential $cred -EnableException
+                      Write-Host "Successfully validated $script"
+                  }
+                  catch {
+                      Write-Error "Failed to validate $script : $_"
+                      throw
+                  }
+                  [System.GC]::Collect()
+              }
+            displayName: 'Validate Scripts'
+          - powershell: |
+              Write-Host "Cleaning up validation database..."
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') DROP DATABASE ValidationDB;"
+              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+              Write-Host "ValidationDB database dropped successfully."
+            displayName: 'Clean Up Validation Database'
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: '$(scriptPath)'
+              artifactName: 'sql-scripts'
+
+  - stage: Deploy
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: DeployScripts
+        steps:
+          - powershell: |
+              # Configure dbatools to trust the SQL Server certificate and disable encryption
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              foreach ($script in $scripts) {
+                  Write-Host "Deploying: $script to dbo01"
+                  Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -Database "dbo01" -File $script.FullName -SqlCredential $cred -EnableException
+              }
+            displayName: 'Deploy Scripts to Production'
