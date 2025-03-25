@@ -48,19 +48,13 @@ stages:
               Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
             displayName: 'Update dbatools'
           - powershell: |
-              Write-Host "Cleaning up database by dropping the Test object..."
-              # Configure dbatools to trust the SQL Server certificate and disable encryption
+              Write-Host "Creating test database..."
               Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
               Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
-              $dropQuery = @"
-              IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Test]') AND type in (N'U'))
-              BEGIN
-                  DROP TABLE [dbo].[Test];
-              END
-              "@
-              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
-            displayName: 'Clean Up Database'
+              $createQuery = "IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'TestDB') CREATE DATABASE TestDB;"
+              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
+            displayName: 'Create Test Database'
           - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
               Write-Host "SqlPassword: [REDACTED]"
@@ -91,7 +85,7 @@ stages:
               foreach ($script in $scripts) {
                 Write-Host "Validating: $script"
                 try {
-                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "TestDB" -File $script.FullName -SqlCredential $cred -EnableException
                 }
                 catch {
                   Write-Error "Failed to validate $script : $_"
@@ -100,6 +94,14 @@ stages:
                 [System.GC]::Collect()
               }
             displayName: 'Validate Scripts'
+          - powershell: |
+              Write-Host "Cleaning up test database..."
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'TestDB') DROP DATABASE TestDB;"
+              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+            displayName: 'Clean Up Test Database'
           - task: PublishBuildArtifacts@1
             inputs:
               pathToPublish: '$(scriptPath)'
