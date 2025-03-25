@@ -61,25 +61,47 @@ stages:
               END
               "@
               try {
+                  Write-Host "Dropping ValidationDB if it exists..."
                   Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+                  Write-Host "ValidationDB dropped successfully."
               }
               catch {
                   Write-Warning "Failed to drop ValidationDB database: $_"
+                  throw "Failed to drop ValidationDB: $_"
               }
               # Manually delete the database files if they still exist
               $mdfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf"
               $ldfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf"
               if (Test-Path $mdfPath) {
                   Write-Host "Deleting existing ValidationDB.mdf file..."
-                  Remove-Item -Path $mdfPath -Force -ErrorAction SilentlyContinue
+                  Remove-Item -Path $mdfPath -Force -ErrorAction Stop
               }
               if (Test-Path $ldfPath) {
                   Write-Host "Deleting existing ValidationDB_log.ldf file..."
-                  Remove-Item -Path $ldfPath -Force -ErrorAction SilentlyContinue
+                  Remove-Item -Path $ldfPath -Force -ErrorAction Stop
               }
               # Create the database
-              $createQuery = "CREATE DATABASE ValidationDB;"
-              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
+              Write-Host "Creating ValidationDB database..."
+              try {
+                  $createQuery = "CREATE DATABASE ValidationDB;"
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
+                  Write-Host "ValidationDB database created successfully."
+              }
+              catch {
+                  Write-Error "Failed to create ValidationDB database: $_"
+                  throw "Failed to create ValidationDB: $_"
+              }
+              # Verify the database exists
+              Write-Host "Verifying ValidationDB database exists..."
+              $checkQuery = "SELECT name FROM sys.databases WHERE name = 'ValidationDB';"
+              $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $checkQuery -SqlCredential $cred -EnableException
+              if ($result -and $result.name -eq 'ValidationDB') {
+                  Write-Host "ValidationDB database exists: $($result.name)"
+              }
+              else {
+                  Write-Error "ValidationDB database was not created successfully!"
+                  throw "Database creation verification failed: ValidationDB not found"
+              }
             displayName: 'Create Validation Database'
           - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
@@ -106,12 +128,26 @@ stages:
               # Create credential object
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
 
+              # Verify connection to ValidationDB
+              Write-Host "Verifying connection to ValidationDB..."
+              $checkQuery = "SELECT DB_NAME() AS CurrentDatabase;"
+              $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -Query $checkQuery -SqlCredential $cred -EnableException
+              Write-Host "Connected to database: $($result.CurrentDatabase)"
+
               # Process scripts one at a time
+              Write-Host "Looking for scripts in $(scriptPath)..."
               $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              if (-not $scripts) {
+                  Write-Error "No .sql files found in $(scriptPath)! At least one script is required."
+                  throw "No scripts found to validate"
+              }
+              Write-Host "Found $($scripts.Count) script(s):"
+              $scripts | ForEach-Object { Write-Host $_.Name }
               foreach ($script in $scripts) {
                 Write-Host "Validating: $script"
                 try {
                   Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -File $script.FullName -SqlCredential $cred -EnableException
+                  Write-Host "Successfully validated $script"
                 }
                 catch {
                   Write-Error "Failed to validate $script : $_"
@@ -127,6 +163,7 @@ stages:
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
               $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') DROP DATABASE ValidationDB;"
               Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+              Write-Host "ValidationDB database dropped successfully."
             displayName: 'Clean Up Validation Database'
           - task: PublishBuildArtifacts@1
             inputs:
