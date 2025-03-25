@@ -7,7 +7,7 @@ parameters:
     default: 'techpc'
   - name: databaseName
     type: string
-    default: 'dbo01'
+    default: 'db01'
   - name: scriptPath
     type: string
     default: '$(Build.SourcesDirectory)/scripts/releases'
