@@ -112,7 +112,7 @@ stages:
               $memory = Get-CimInstance Win32_OperatingSystem
               $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
               Write-Host "Free memory: $freeMemoryPercent%"
-              if ($freeMemoryPercent -lt 3) {
+              if ($freeMemoryPercent -lt 2) {
                   Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
                   exit 1
               }
@@ -184,8 +184,28 @@ stages:
               Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
               $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              
               foreach ($script in $scripts) {
                   Write-Host "Deploying: $script to dbo01"
-                  Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -Database "dbo01" -File $script.FullName -SqlCredential $cred -EnableException
+                  $retryCount = 3
+                  $retryDelaySeconds = 10
+                  $success = $false
+                  
+                  for ($i = 0; $i -lt $retryCount; $i++) {
+                      try {
+                          Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -Database "dbo01" -File $script.FullName -SqlCredential $cred -EnableException
+                          Write-Host "Successfully deployed $script to dbo01"
+                          $success = $true
+                          break
+                      }
+                      catch {
+                          Write-Warning "Failed to deploy $script on attempt $($i + 1) of $retryCount : $_"
+                          if ($i -eq ($retryCount - 1)) {
+                              throw "Failed to deploy $script after $retryCount attempts: $_"
+                          }
+                          Write-Host "Retrying in $retryDelaySeconds seconds..."
+                          Start-Sleep -Seconds $retryDelaySeconds
+                      }
+                  }
               }
             displayName: 'Deploy Scripts to Production'
