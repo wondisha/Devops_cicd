@@ -17,166 +17,166 @@ variables:
 
 stages:
   - stage: Build
-  jobs:
-    - job: ValidateScripts
-      timeoutInMinutes: 10
-      steps:
-        - powershell: |
-            Write-Host "Current working directory: $PWD"
-            Write-Host "Listing files in $(Build.SourcesDirectory):"
-            Get-ChildItem -Path "$(Build.SourcesDirectory)"
-          displayName: 'List Files in Sources Directory'
-        - powershell: |
-            Write-Host "Listing environment variables:"
-            Get-ChildItem env: | Where-Object { $_.Name -like "*SQL*" }
-          displayName: 'List Environment Variables'
-        - powershell: '.\debug-variables.ps1'
-          displayName: 'Debug Variables'
-          workingDirectory: '$(Build.SourcesDirectory)'
-        - powershell: |
-            Write-Host "Updating dbatools to the latest version..."
-            Uninstall-Module -Name dbatools -AllVersions -Force -ErrorAction Continue
-            # Also manually remove module folders in case Uninstall-Module fails
-            Remove-Item -Path "C:\Program Files\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path "C:\Program Files (x86)\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path "$env:USERPROFILE\Documents\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
-            Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -SkipPublisherCheck -ErrorAction Stop
-            Import-Module -Name dbatools -Force -ErrorAction Stop
-            $updatedModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
-            Write-Host "Updated dbatools version: $($updatedModule.Version) at $($updatedModule.ModuleBase)"
-            $loadedModule = Get-Module -Name dbatools
-            Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
-          displayName: 'Update dbatools'
-        - powershell: |
-            Write-Host "Creating validation database..."
-            Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
-            Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
-            $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
-            # Drop the database if it exists to ensure a clean state
-            $dropQuery = @"
-            IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB')
-            BEGIN
-                ALTER DATABASE ValidationDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-                DROP DATABASE ValidationDB;
-            END
-            "@
-            try {
-                Write-Host "Dropping ValidationDB if it exists..."
-                Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
-                Write-Host "ValidationDB dropped successfully."
-            }
-            catch {
-                Write-Warning "Failed to drop ValidationDB database: $_"
-                throw "Failed to drop ValidationDB: $_"
-            }
-            # Manually delete the database files if they still exist
-            $mdfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf"
-            $ldfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf"
-            if (Test-Path $mdfPath) {
-                Write-Host "Deleting existing ValidationDB.mdf file..."
-                Remove-Item -Path $mdfPath -Force -ErrorAction Stop
-            }
-            if (Test-Path $ldfPath) {
-                Write-Host "Deleting existing ValidationDB_log.ldf file..."
-                Remove-Item -Path $ldfPath -Force -ErrorAction Stop
-            }
-            # Create the database with explicit file locations
-            Write-Host "Creating ValidationDB database..."
-            try {
-                $createQuery = @"
-                CREATE DATABASE ValidationDB
-                ON (NAME = ValidationDB, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf')
-                LOG ON (NAME = ValidationDB_log, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf');
-                "@
-                Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
-                Write-Host "ValidationDB database created successfully."
-            }
-            catch {
-                Write-Error "Failed to create ValidationDB database: $_"
-                throw "Failed to create ValidationDB: $_"
-            }
-            # Verify the database exists
-            Write-Host "Verifying ValidationDB database exists..."
-            $checkQuery = "SELECT name FROM sys.databases WHERE name = 'ValidationDB';"
-            $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $checkQuery -SqlCredential $cred -EnableException
-            if ($result -and $result.name -eq 'ValidationDB') {
-                Write-Host "ValidationDB database exists: $($result.name)"
-            }
-            else {
-                Write-Error "ValidationDB database was not created successfully!"
-                throw "Database creation verification failed: ValidationDB not found"
-            }
-          displayName: 'Create Validation Database'
-        - powershell: |
-            Write-Host "Pausing pipeline for 5 minutes to allow manual verification of ValidationDB..."
-            Start-Sleep -Seconds 300
-          displayName: 'Pause for Verification'
-        - powershell: |
-            Write-Host "SqlUsername: $(SqlUsername)"
-            Write-Host "SqlPassword: [REDACTED]"
-            # Monitor memory usage
-            $memory = Get-CimInstance Win32_OperatingSystem
-            $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
-            Write-Host "Free memory: $freeMemoryPercent%"
-            if ($freeMemoryPercent -lt 3) {
-              Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
-              exit 1
-            }
-
-            # Ensure dbatools is loaded
-            Import-Module -Name dbatools -Force -ErrorAction Stop
-            $loadedModule = Get-Module -Name dbatools
-            Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
-
-            # Configure dbatools to trust the SQL Server certificate and disable encryption
-            Write-Host "Configuring dbatools to trust SQL Server certificate..."
-            Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
-            Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
-
-            # Create credential object
-            $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
-
-            # Verify connection to ValidationDB
-            Write-Host "Verifying connection to ValidationDB..."
-            $checkQuery = "SELECT DB_NAME() AS CurrentDatabase;"
-            $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -Query $checkQuery -SqlCredential $cred -EnableException
-            Write-Host "Connected to database: $($result.CurrentDatabase)"
-
-            # Process scripts one at a time
-            Write-Host "Looking for scripts in $(scriptPath)..."
-            $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
-            if (-not $scripts) {
-                Write-Error "No .sql files found in $(scriptPath)! At least one script is required."
-                throw "No scripts found to validate"
-            }
-            Write-Host "Found $($scripts.Count) script(s):"
-            $scripts | ForEach-Object { Write-Host $_.Name }
-            foreach ($script in $scripts) {
-              Write-Host "Validating: $script"
+    jobs:
+      - job: ValidateScripts
+        timeoutInMinutes: 10
+        steps:
+          - powershell: |
+              Write-Host "Current working directory: $PWD"
+              Write-Host "Listing files in $(Build.SourcesDirectory):"
+              Get-ChildItem -Path "$(Build.SourcesDirectory)"
+            displayName: 'List Files in Sources Directory'
+          - powershell: |
+              Write-Host "Listing environment variables:"
+              Get-ChildItem env: | Where-Object { $_.Name -like "*SQL*" }
+            displayName: 'List Environment Variables'
+          - powershell: '.\debug-variables.ps1'
+            displayName: 'Debug Variables'
+            workingDirectory: '$(Build.SourcesDirectory)'
+          - powershell: |
+              Write-Host "Updating dbatools to the latest version..."
+              Uninstall-Module -Name dbatools -AllVersions -Force -ErrorAction Continue
+              # Also manually remove module folders in case Uninstall-Module fails
+              Remove-Item -Path "C:\Program Files\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item -Path "C:\Program Files (x86)\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item -Path "$env:USERPROFILE\Documents\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+              Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -SkipPublisherCheck -ErrorAction Stop
+              Import-Module -Name dbatools -Force -ErrorAction Stop
+              $updatedModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
+              Write-Host "Updated dbatools version: $($updatedModule.Version) at $($updatedModule.ModuleBase)"
+              $loadedModule = Get-Module -Name dbatools
+              Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
+            displayName: 'Update dbatools'
+          - powershell: |
+              Write-Host "Creating validation database..."
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              # Drop the database if it exists to ensure a clean state
+              $dropQuery = @"
+              IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB')
+              BEGIN
+                  ALTER DATABASE ValidationDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                  DROP DATABASE ValidationDB;
+              END
+              "@
               try {
-                Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -File $script.FullName -SqlCredential $cred -EnableException
-                Write-Host "Successfully validated $script"
+                  Write-Host "Dropping ValidationDB if it exists..."
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+                  Write-Host "ValidationDB dropped successfully."
               }
               catch {
-                Write-Error "Failed to validate $script : $_"
-                throw
+                  Write-Warning "Failed to drop ValidationDB database: $_"
+                  throw "Failed to drop ValidationDB: $_"
               }
-              [System.GC]::Collect()
-            }
-          displayName: 'Validate Scripts'
-        - powershell: |
-            Write-Host "Cleaning up validation database..."
-            Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
-            Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
-            $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
-            $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') DROP DATABASE ValidationDB;"
-            Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
-            Write-Host "ValidationDB database dropped successfully."
-          displayName: 'Clean Up Validation Database'
-        - task: PublishBuildArtifacts@1
-          inputs:
-            pathToPublish: '$(scriptPath)'
-            artifactName: 'sql-scripts'
+              # Manually delete the database files if they still exist
+              $mdfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf"
+              $ldfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf"
+              if (Test-Path $mdfPath) {
+                  Write-Host "Deleting existing ValidationDB.mdf file..."
+                  Remove-Item -Path $mdfPath -Force -ErrorAction Stop
+              }
+              if (Test-Path $ldfPath) {
+                  Write-Host "Deleting existing ValidationDB_log.ldf file..."
+                  Remove-Item -Path $ldfPath -Force -ErrorAction Stop
+              }
+              # Create the database with explicit file locations
+              Write-Host "Creating ValidationDB database..."
+              try {
+                  $createQuery = @"
+                  CREATE DATABASE ValidationDB
+                  ON (NAME = ValidationDB, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf')
+                  LOG ON (NAME = ValidationDB_log, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf');
+                  "@
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
+                  Write-Host "ValidationDB database created successfully."
+              }
+              catch {
+                  Write-Error "Failed to create ValidationDB database: $_"
+                  throw "Failed to create ValidationDB: $_"
+              }
+              # Verify the database exists
+              Write-Host "Verifying ValidationDB database exists..."
+              $checkQuery = "SELECT name FROM sys.databases WHERE name = 'ValidationDB';"
+              $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $checkQuery -SqlCredential $cred -EnableException
+              if ($result -and $result.name -eq 'ValidationDB') {
+                  Write-Host "ValidationDB database exists: $($result.name)"
+              }
+              else {
+                  Write-Error "ValidationDB database was not created successfully!"
+                  throw "Database creation verification failed: ValidationDB not found"
+              }
+            displayName: 'Create Validation Database'
+          - powershell: |
+              Write-Host "Pausing pipeline for 5 minutes to allow manual verification of ValidationDB..."
+              Start-Sleep -Seconds 300
+            displayName: 'Pause for Verification'
+          - powershell: |
+              Write-Host "SqlUsername: $(SqlUsername)"
+              Write-Host "SqlPassword: [REDACTED]"
+              # Monitor memory usage
+              $memory = Get-CimInstance Win32_OperatingSystem
+              $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+              Write-Host "Free memory: $freeMemoryPercent%"
+              if ($freeMemoryPercent -lt 3) {
+                Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+                exit 1
+              }
+
+              # Ensure dbatools is loaded
+              Import-Module -Name dbatools -Force -ErrorAction Stop
+              $loadedModule = Get-Module -Name dbatools
+              Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
+
+              # Configure dbatools to trust the SQL Server certificate and disable encryption
+              Write-Host "Configuring dbatools to trust SQL Server certificate..."
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+
+              # Create credential object
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+
+              # Verify connection to ValidationDB
+              Write-Host "Verifying connection to ValidationDB..."
+              $checkQuery = "SELECT DB_NAME() AS CurrentDatabase;"
+              $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -Query $checkQuery -SqlCredential $cred -EnableException
+              Write-Host "Connected to database: $($result.CurrentDatabase)"
+
+              # Process scripts one at a time
+              Write-Host "Looking for scripts in $(scriptPath)..."
+              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              if (-not $scripts) {
+                  Write-Error "No .sql files found in $(scriptPath)! At least one script is required."
+                  throw "No scripts found to validate"
+              }
+              Write-Host "Found $($scripts.Count) script(s):"
+              $scripts | ForEach-Object { Write-Host $_.Name }
+              foreach ($script in $scripts) {
+                Write-Host "Validating: $script"
+                try {
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -File $script.FullName -SqlCredential $cred -EnableException
+                  Write-Host "Successfully validated $script"
+                }
+                catch {
+                  Write-Error "Failed to validate $script : $_"
+                  throw
+                }
+                [System.GC]::Collect()
+              }
+            displayName: 'Validate Scripts'
+          - powershell: |
+              Write-Host "Cleaning up validation database..."
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') DROP DATABASE ValidationDB;"
+              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+              Write-Host "ValidationDB database dropped successfully."
+            displayName: 'Clean Up Validation Database'
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: '$(scriptPath)'
+              artifactName: 'sql-scripts'
 
   - stage: Deploy
     dependsOn: Build
@@ -191,7 +191,7 @@ stages:
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
               $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
               foreach ($script in $scripts) {
-                Write-Host "Deploying: $script"
-                Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException
+                Write-Host "Deploying: $script to dbo01"
+                Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -Database "dbo01" -File $script.FullName -SqlCredential $cred -EnableException
               }
             displayName: 'Deploy Scripts to Production'
