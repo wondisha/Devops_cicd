@@ -10,19 +10,19 @@ parameters:
     default: 'techpc'  # Dev SQL Server instance
   - name: devDb
     type: string
-    default: 'dbo01'  # Dev database
+    default: 'db01'  # Dev database
   - name: qaSqlInstance
     type: string
     default: 'techpc'  # QA SQL Server instance (update to your QA instance)
   - name: qaDb
     type: string
-    default: 'dbo01'  # QA database (update to your QA database)
+    default: 'db01'  # QA database (update to your QA database)
   - name: prodSqlInstance
     type: string
     default: 'techpc'  # Production SQL Server instance (update to your Prod instance)
   - name: prodDb
     type: string
-    default: 'dbo01'  # Production database (update to your Prod database)
+    default: 'db01'  # Production database (update to your Prod database)
   - name: scriptPath
     type: string
     default: '$(Build.SourcesDirectory)/scripts/releases'
