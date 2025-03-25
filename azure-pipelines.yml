@@ -21,8 +21,14 @@ stages:
       - job: ValidateScripts
         timeoutInMinutes: 10
         steps:
+          - powershell: |
+              Write-Host "Current working directory: $PWD"
+              Write-Host "Listing files in $(Build.SourcesDirectory):"
+              Get-ChildItem -Path "$(Build.SourcesDirectory)"
+            displayName: 'List Files in Sources Directory'
           - powershell: './debug-variables.ps1'
             displayName: 'Debug Variables'
+            workingDirectory: '$(Build.SourcesDirectory)'
           - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
               Write-Host "SqlPassword: [REDACTED]"
