@@ -52,7 +52,17 @@ stages:
               Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
               Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
-              $createQuery = "IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'TestDB') CREATE DATABASE TestDB;"
+              # Drop the database if it exists to ensure a clean state
+              $dropQuery = @"
+              IF EXISTS (SELECT * FROM sys.databases WHERE name = 'TestDB')
+              BEGIN
+                  ALTER DATABASE TestDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                  DROP DATABASE TestDB;
+              END
+              "@
+              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+              # Create the database
+              $createQuery = "CREATE DATABASE TestDB;"
               Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
             displayName: 'Create Test Database'
           - powershell: |
