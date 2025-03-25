@@ -34,6 +34,20 @@ stages:
             displayName: 'Debug Variables'
             workingDirectory: '$(Build.SourcesDirectory)'
           - powershell: |
+              Write-Host "Updating dbatools to the latest version..."
+              Uninstall-Module -Name dbatools -AllVersions -Force -ErrorAction Continue
+              # Also manually remove module folders in case Uninstall-Module fails
+              Remove-Item -Path "C:\Program Files\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item -Path "C:\Program Files (x86)\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item -Path "$env:USERPROFILE\Documents\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+              Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -SkipPublisherCheck -ErrorAction Stop
+              Import-Module -Name dbatools -Force -ErrorAction Stop
+              $updatedModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
+              Write-Host "Updated dbatools version: $($updatedModule.Version) at $($updatedModule.ModuleBase)"
+              $loadedModule = Get-Module -Name dbatools
+              Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
+            displayName: 'Update dbatools'
+          - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
               Write-Host "SqlPassword: [REDACTED]"
               # Monitor memory usage
@@ -45,16 +59,7 @@ stages:
                 exit 1
               }
 
-              # Ensure dbatools is installed
-              Write-Host "Checking dbatools version..."
-              $currentModules = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending
-              if ($currentModules) {
-                Write-Host "Current dbatools versions installed:"
-                $currentModules | ForEach-Object { Write-Host "Version: $($_.Version) at $($_.ModuleBase)" }
-              } else {
-                Write-Host "dbatools not found, installing..."
-                Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -ErrorAction Stop
-              }
+              # Ensure dbatools is loaded
               Import-Module -Name dbatools -Force -ErrorAction Stop
               $loadedModule = Get-Module -Name dbatools
               Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
@@ -85,3 +90,21 @@ stages:
             inputs:
               pathToPublish: '$(scriptPath)'
               artifactName: 'sql-scripts'
+
+  - stage: Deploy
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: DeployScripts
+        steps:
+          - powershell: |
+              # Configure dbatools to trust the SQL Server certificate and disable encryption
+              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              foreach ($script in $scripts) {
+                Write-Host "Deploying: $script"
+                Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -File $script.FullName -SqlCredential $cred -EnableException
+              }
+            displayName: 'Deploy Scripts to Production'
