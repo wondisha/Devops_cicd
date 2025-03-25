@@ -28,7 +28,7 @@ parameters:
     default: '$(Build.SourcesDirectory)/scripts/releases'
   - name: loggingSqlInstance
     type: string
-    default: 'techpc'  # Update to your logging SQL Server instances
+    default: 'techpc'  # Update to your logging SQL Server instance
   - name: loggingDb
     type: string
     default: 'DeploymentLog'
@@ -162,9 +162,7 @@ stages:
               # Verify connection to ${{ parameters.testDb }}
               Write-Host "Verifying connection to ${{ parameters.testDb }}..."
               $checkQuery = "SELECT DB_NAME() AS CurrentDatabase;"
-              $result = Invoke-DbaQuery -SqlInstance "${{ parameters.testਰ
-
-.testSqlInstance }}" -Database "${{ parameters.testDb }}" -Query $checkQuery -SqlCredential $cred -EnableException
+              $result = Invoke-DbaQuery -SqlInstance "${{ parameters.testSqlInstance }}" -Database "${{ parameters.testDb }}" -Query $checkQuery -SqlCredential $cred -EnableException
               Write-Host "Connected to database: $($result.CurrentDatabase)"
 
               # Define script types to validate in order
