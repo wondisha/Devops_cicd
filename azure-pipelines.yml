@@ -1,17 +1,25 @@
+parameters:
+  - name: testSqlInstance
+    type: string
+    default: 'techpc'
+  - name: prodSqlInstance
+    type: string
+    default: 'techpc'
+  - name: databaseName
+    type: string
+    default: 'dbo01'
+  - name: scriptPath
+    type: string
+    default: '$(Build.SourcesDirectory)/scripts/releases'
+
 trigger:
   - master
 
 pool:
-  name: 'Default'
+  name: 'Default'  # Switch to 'vmImage: windows-latest' once approved for Microsoft-hosted agents
 
 variables:
   - group: SqlCreds
-  - name: testSqlInstance
-    value: 'techpc'
-  - name: prodSqlInstance
-    value: 'techpc'
-  - name: scriptPath
-    value: '$(Build.SourcesDirectory)/scripts/releases'
   - name: system.debug
     value: true
 
@@ -57,7 +65,7 @@ stages:
               Write-Host "Dropping ValidationDB if it exists..."
               $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') BEGIN ALTER DATABASE ValidationDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE ValidationDB; END"
               try {
-                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+                  Invoke-DbaQuery -SqlInstance "${{ parameters.testSqlInstance }}" -Query $dropQuery -SqlCredential $cred -EnableException
                   Write-Host "ValidationDB dropped successfully."
               }
               catch {
@@ -81,7 +89,7 @@ stages:
               Write-Host "Creating ValidationDB database..."
               $createQuery = "CREATE DATABASE ValidationDB ON (NAME = ValidationDB, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf') LOG ON (NAME = ValidationDB_log, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf')"
               try {
-                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
+                  Invoke-DbaQuery -SqlInstance "${{ parameters.testSqlInstance }}" -Query $createQuery -SqlCredential $cred -EnableException
                   Write-Host "ValidationDB database created successfully."
               }
               catch {
@@ -92,7 +100,7 @@ stages:
               # Verify the database exists
               Write-Host "Verifying ValidationDB database exists..."
               $checkQuery = "SELECT name FROM sys.databases WHERE name = 'ValidationDB'"
-              $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $checkQuery -SqlCredential $cred -EnableException
+              $result = Invoke-DbaQuery -SqlInstance "${{ parameters.testSqlInstance }}" -Query $checkQuery -SqlCredential $cred -EnableException
               if ($result -and $result.name -eq 'ValidationDB') {
                   Write-Host "ValidationDB database exists: $($result.name)"
               }
@@ -133,14 +141,14 @@ stages:
               # Verify connection to ValidationDB
               Write-Host "Verifying connection to ValidationDB..."
               $checkQuery = "SELECT DB_NAME() AS CurrentDatabase;"
-              $result = Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -Query $checkQuery -SqlCredential $cred -EnableException
+              $result = Invoke-DbaQuery -SqlInstance "${{ parameters.testSqlInstance }}" -Database "ValidationDB" -Query $checkQuery -SqlCredential $cred -EnableException
               Write-Host "Connected to database: $($result.CurrentDatabase)"
 
               # Process scripts one at a time
-              Write-Host "Looking for scripts in $(scriptPath)..."
-              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
+              Write-Host "Looking for scripts in ${{ parameters.scriptPath }}..."
+              $scripts = Get-ChildItem -Path "${{ parameters.scriptPath }}" -Filter "*.sql"
               if (-not $scripts) {
-                  Write-Error "No .sql files found in $(scriptPath)! At least one script is required."
+                  Write-Error "No .sql files found in ${{ parameters.scriptPath }}! At least one script is required."
                   throw "No scripts found to validate"
               }
               Write-Host "Found $($scripts.Count) script(s):"
@@ -148,7 +156,7 @@ stages:
               foreach ($script in $scripts) {
                   Write-Host "Validating: $script"
                   try {
-                      Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -File $script.FullName -SqlCredential $cred -EnableException
+                      Invoke-DbaQuery -SqlInstance "${{ parameters.testSqlInstance }}" -Database "ValidationDB" -File $script.FullName -SqlCredential $cred -EnableException
                       Write-Host "Successfully validated $script"
                   }
                   catch {
@@ -164,61 +172,67 @@ stages:
               Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
               $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') DROP DATABASE ValidationDB;"
-              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+              Invoke-DbaQuery -SqlInstance "${{ parameters.testSqlInstance }}" -Query $dropQuery -SqlCredential $cred -EnableException
               Write-Host "ValidationDB database dropped successfully."
             displayName: 'Clean Up Validation Database'
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: '$(scriptPath)'
+              pathToPublish: '${{ parameters.scriptPath }}'
               artifactName: 'sql-scripts'
 
   - stage: Deploy
     dependsOn: Build
     condition: succeeded()
     jobs:
-      - job: DeployScripts
-        steps:
-          - powershell: |
-              # Configure dbatools to trust the SQL Server certificate and disable encryption
-              Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
-              Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
-              $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
-              
-              # Verify connection to SQL Server and access to dbo01
-              Write-Host "Verifying connection to SQL Server and access to dbo01..."
-              try {
-                  $testQuery = "SELECT 1 AS Test"
-                  Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -Database "dbo01" -Query $testQuery -SqlCredential $cred -EnableException
-                  Write-Host "Successfully connected to dbo01 on $(prodSqlInstance)"
-              }
-              catch {
-                  Write-Error "Failed to connect to dbo01 on $(prodSqlInstance): $_"
-                  throw "Connection verification failed: $_"
-              }
+      - deployment: DeployScripts
+        environment: 'Production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - powershell: |
+                    Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
+                    Start-Sleep -Seconds 30
+                    # Configure dbatools to trust the SQL Server certificate and disable encryption
+                    Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+                    Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+                    $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+                    
+                    # Verify connection to SQL Server and access to target database
+                    Write-Host "Verifying connection to SQL Server and access to ${{ parameters.databaseName }}..."
+                    try {
+                        $testQuery = "SELECT 1 AS Test"
+                        Invoke-DbaQuery -SqlInstance "${{ parameters.prodSqlInstance }}" -Database "${{ parameters.databaseName }}" -Query $testQuery -SqlCredential $cred -EnableException
+                        Write-Host "Successfully connected to ${{ parameters.databaseName }} on ${{ parameters.prodSqlInstance }}"
+                    }
+                    catch {
+                        Write-Error "Failed to connect to ${{ parameters.databaseName }} on ${{ parameters.prodSqlInstance }}: $_"
+                        throw "Connection verification failed: $_"
+                    }
 
-              $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
-              
-              foreach ($script in $scripts) {
-                  Write-Host "Deploying: $script to dbo01"
-                  $retryCount = 3
-                  $retryDelaySeconds = 10
-                  $success = $false
-                  
-                  for ($i = 0; $i -lt $retryCount; $i++) {
-                      try {
-                          Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -Database "dbo01" -File $script.FullName -SqlCredential $cred -EnableException
-                          Write-Host "Successfully deployed $script to dbo01"
-                          $success = $true
-                          break
-                      }
-                      catch {
-                          Write-Warning "Failed to deploy $script on attempt $($i + 1) of $retryCount : $_"
-                          if ($i -eq ($retryCount - 1)) {
-                              throw "Failed to deploy $script after $retryCount attempts: $_"
-                          }
-                          Write-Host "Retrying in $retryDelaySeconds seconds..."
-                          Start-Sleep -Seconds $retryDelaySeconds
-                      }
-                  }
-              }
-            displayName: 'Deploy Scripts to Production'
+                    $scripts = Get-ChildItem -Path "${{ parameters.scriptPath }}" -Filter "*.sql"
+                    
+                    foreach ($script in $scripts) {
+                        Write-Host "Deploying: $script to ${{ parameters.databaseName }}"
+                        $retryCount = 3
+                        $retryDelaySeconds = 10
+                        $success = $false
+                        
+                        for ($i = 0; $i -lt $retryCount; $i++) {
+                            try {
+                                Invoke-DbaQuery -SqlInstance "${{ parameters.prodSqlInstance }}" -Database "${{ parameters.databaseName }}" -File $script.FullName -SqlCredential $cred -EnableException
+                                Write-Host "Successfully deployed $script to ${{ parameters.databaseName }}"
+                                $success = $true
+                                break
+                            }
+                            catch {
+                                Write-Warning "Failed to deploy $script on attempt $($i + 1) of $retryCount : $_"
+                                if ($i -eq ($retryCount - 1)) {
+                                    throw "Failed to deploy $script after $retryCount attempts: $_"
+                                }
+                                Write-Host "Retrying in $retryDelaySeconds seconds..."
+                                Start-Sleep -Seconds $retryDelaySeconds
+                            }
+                        }
+                    }
+                  displayName: 'Deploy Scripts to Production'
