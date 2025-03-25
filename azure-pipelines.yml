@@ -21,7 +21,7 @@ stages:
       - job: ValidateScripts
         timeoutInMinutes: 10
         steps:
-          - powershell: '$(Build.SourcesDirectory)/debug-variables.ps1'
+          - powershell: './debug-variables.ps1'
             displayName: 'Debug Variables'
           - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
