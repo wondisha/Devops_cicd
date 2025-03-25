@@ -28,7 +28,7 @@ parameters:
     default: '$(Build.SourcesDirectory)/scripts/releases'
   - name: loggingSqlInstance
     type: string
-    default: 'techpc'  # Update to your logging SQL Server instance
+    default: 'techpc'  # Update to your logging SQL Server instances
   - name: loggingDb
     type: string
     default: 'DeploymentLog'
