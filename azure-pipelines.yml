@@ -45,10 +45,19 @@ stages:
                 exit 1
               }
 
-              # Ensure dbatools is installed
-              if (-not (Get-Module -ListAvailable -Name dbatools)) {
-                Install-Module -Name dbatools -Force -Scope CurrentUser
+              # Ensure dbatools is installed and up to date
+              Write-Host "Checking dbatools version..."
+              $currentModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
+              if ($currentModule) {
+                Write-Host "Current dbatools version: $($currentModule.Version)"
+              } else {
+                Write-Host "dbatools not found."
               }
+              Write-Host "Installing or updating dbatools..."
+              Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber
+              Import-Module -Name dbatools -Force
+              $updatedModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
+              Write-Host "Updated dbatools version: $($updatedModule.Version)"
 
               # Create credential object
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
