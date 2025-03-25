@@ -47,17 +47,29 @@ stages:
 
               # Ensure dbatools is installed and up to date
               Write-Host "Checking dbatools version..."
-              $currentModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
-              if ($currentModule) {
-                Write-Host "Current dbatools version: $($currentModule.Version)"
+              $currentModules = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending
+              if ($currentModules) {
+                Write-Host "Current dbatools versions installed:"
+                $currentModules | ForEach-Object { Write-Host "Version: $($_.Version) at $($_.ModuleBase)" }
+                Write-Host "Uninstalling existing dbatools versions..."
+                Uninstall-Module -Name dbatools -AllVersions -Force -ErrorAction Continue
+                # Also manually remove module folders in case Uninstall-Module fails
+                Remove-Item -Path "C:\Program Files\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+                Remove-Item -Path "$env:USERPROFILE\Documents\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
               } else {
                 Write-Host "dbatools not found."
               }
-              Write-Host "Installing or updating dbatools..."
-              Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber
-              Import-Module -Name dbatools -Force
+              Write-Host "Installing dbatools..."
+              Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -ErrorAction Stop
+              Import-Module -Name dbatools -Force -ErrorAction Stop
               $updatedModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
-              Write-Host "Updated dbatools version: $($updatedModule.Version)"
+              Write-Host "Updated dbatools version: $($updatedModule.Version) at $($updatedModule.ModuleBase)"
+              # Verify the loaded module version
+              $loadedModule = Get-Module -Name dbatools
+              Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
+              # Verify Invoke-DbaQuery parameters
+              $command = Get-Command Invoke-DbaQuery
+              Write-Host "Invoke-DbaQuery parameters: $($command.Parameters.Keys -join ', ')"
 
               # Create credential object
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
