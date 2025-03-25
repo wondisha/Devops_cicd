@@ -183,6 +183,19 @@ stages:
               Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
               Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
+              
+              # Verify connection to SQL Server and access to dbo01
+              Write-Host "Verifying connection to SQL Server and access to dbo01..."
+              try {
+                  $testQuery = "SELECT 1 AS Test"
+                  Invoke-DbaQuery -SqlInstance "$(prodSqlInstance)" -Database "dbo01" -Query $testQuery -SqlCredential $cred -EnableException
+                  Write-Host "Successfully connected to dbo01 on $(prodSqlInstance)"
+              }
+              catch {
+                  Write-Error "Failed to connect to dbo01 on $(prodSqlInstance): $_"
+                  throw "Connection verification failed: $_"
+              }
+
               $scripts = Get-ChildItem -Path "$(scriptPath)" -Filter "*.sql"
               
               foreach ($script in $scripts) {
