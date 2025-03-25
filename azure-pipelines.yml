@@ -48,23 +48,39 @@ stages:
               Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
             displayName: 'Update dbatools'
           - powershell: |
-              Write-Host "Creating test database..."
+              Write-Host "Creating validation database..."
               Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
               Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
               # Drop the database if it exists to ensure a clean state
               $dropQuery = @"
-              IF EXISTS (SELECT * FROM sys.databases WHERE name = 'TestDB')
+              IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB')
               BEGIN
-                  ALTER DATABASE TestDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-                  DROP DATABASE TestDB;
+                  ALTER DATABASE ValidationDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                  DROP DATABASE ValidationDB;
               END
               "@
-              Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+              try {
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
+              }
+              catch {
+                  Write-Warning "Failed to drop ValidationDB database: $_"
+              }
+              # Manually delete the database files if they still exist
+              $mdfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf"
+              $ldfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf"
+              if (Test-Path $mdfPath) {
+                  Write-Host "Deleting existing ValidationDB.mdf file..."
+                  Remove-Item -Path $mdfPath -Force -ErrorAction SilentlyContinue
+              }
+              if (Test-Path $ldfPath) {
+                  Write-Host "Deleting existing ValidationDB_log.ldf file..."
+                  Remove-Item -Path $ldfPath -Force -ErrorAction SilentlyContinue
+              }
               # Create the database
-              $createQuery = "CREATE DATABASE TestDB;"
+              $createQuery = "CREATE DATABASE ValidationDB;"
               Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $createQuery -SqlCredential $cred -EnableException
-            displayName: 'Create Test Database'
+            displayName: 'Create Validation Database'
           - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
               Write-Host "SqlPassword: [REDACTED]"
@@ -95,7 +111,7 @@ stages:
               foreach ($script in $scripts) {
                 Write-Host "Validating: $script"
                 try {
-                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "TestDB" -File $script.FullName -SqlCredential $cred -EnableException
+                  Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Database "ValidationDB" -File $script.FullName -SqlCredential $cred -EnableException
                 }
                 catch {
                   Write-Error "Failed to validate $script : $_"
@@ -105,13 +121,13 @@ stages:
               }
             displayName: 'Validate Scripts'
           - powershell: |
-              Write-Host "Cleaning up test database..."
+              Write-Host "Cleaning up validation database..."
               Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
               Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
               $cred = New-Object System.Management.Automation.PSCredential ("$(SqlUsername)", (ConvertTo-SecureString "$(SqlPassword)" -AsPlainText -Force))
-              $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'TestDB') DROP DATABASE TestDB;"
+              $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') DROP DATABASE ValidationDB;"
               Invoke-DbaQuery -SqlInstance "$(testSqlInstance)" -Query $dropQuery -SqlCredential $cred -EnableException
-            displayName: 'Clean Up Test Database'
+            displayName: 'Clean Up Validation Database'
           - task: PublishBuildArtifacts@1
             inputs:
               pathToPublish: '$(scriptPath)'
