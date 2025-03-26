@@ -132,7 +132,7 @@ stages:
             displayName: 'Create Validation Database'
           - powershell: |
               Write-Host "Pausing pipeline for 5 minutes to allow manual verification of ${{ parameters.testDb }}..."
-              Start-Sleep -Seconds 300
+              Start-Sleep -Seconds 60
             displayName: 'Pause for Verification'
           - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
