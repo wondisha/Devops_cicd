@@ -136,7 +136,7 @@ stages:
             displayName: 'Create Validation Database'
           - powershell: |
               Write-Host "Pausing pipeline for 5 minutes to allow manual verification of ${{ parameters.testDb }}..."
-              Start-Sleep -Seconds 60
+              Start-Sleep -Seconds 300
             displayName: 'Pause for Verification'
             condition: eq('${{ parameters.pauseForVerification }}', 'true')
           - powershell: |
@@ -224,8 +224,8 @@ stages:
               steps:
                 - powershell: |
                     Write-Host "Checking environment for deployment..."
-                    Write-Host "Environment: $(System.Environment)"
-                    Write-Host "Stage: $(System.StageName)"
+                    Write-Host "Environment: $env:SYSTEM_ENVIRONMENT"
+                    Write-Host "Stage: $env:SYSTEM_STAGENAME"
                   displayName: 'Log Environment Details'
                 - powershell: |
                     Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
@@ -350,8 +350,8 @@ stages:
               steps:
                 - powershell: |
                     Write-Host "Checking environment for deployment..."
-                    Write-Host "Environment: $(System.Environment)"
-                    Write-Host "Stage: $(System.StageName)"
+                    Write-Host "Environment: $env:SYSTEM_ENVIRONMENT"
+                    Write-Host "Stage: $env:SYSTEM_STAGENAME"
                   displayName: 'Log Environment Details'
                 - powershell: |
                     Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
@@ -476,8 +476,8 @@ stages:
               steps:
                 - powershell: |
                     Write-Host "Checking environment for deployment..."
-                    Write-Host "Environment: $(System.Environment)"
-                    Write-Host "Stage: $(System.StageName)"
+                    Write-Host "Environment: $env:SYSTEM_ENVIRONMENT"
+                    Write-Host "Stage: $env:SYSTEM_STAGENAME"
                   displayName: 'Log Environment Details'
                 - powershell: |
                     Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
