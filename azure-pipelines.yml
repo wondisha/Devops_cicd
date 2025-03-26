@@ -10,7 +10,7 @@ parameters:
     default: 'techpc'  # Dev SQL Server instance
   - name: devDb
     type: string
-    default: 'devDb'  # Dev database
+    default: 'devDb'  # Dev database (can be overridden at runtime)
   - name: qaSqlInstance
     type: string
     default: 'techpc'  # QA SQL Server instance (update to your QA instance)
@@ -32,6 +32,9 @@ parameters:
   - name: loggingDb
     type: string
     default: 'DeploymentLog'
+  - name: pauseForVerification
+    type: boolean
+    default: false  # Controls whether the 5-minute pause occurs in the Build stage
 
 variables:
   - name: system.debug
@@ -41,7 +44,8 @@ trigger:
   - master
 
 pool:
-  name: 'Default'  # Switch to 'vmImage: windows-latest' once approved for Microsoft-hosted agents
+  name: 'Default'  # Switch to the following once approved for Microsoft-hosted agents
+  # vmImage: 'windows-latest'
 
 stages:
   - stage: Build
@@ -132,8 +136,9 @@ stages:
             displayName: 'Create Validation Database'
           - powershell: |
               Write-Host "Pausing pipeline for 5 minutes to allow manual verification of ${{ parameters.testDb }}..."
-              Start-Sleep -Seconds 60
+              Start-Sleep -Seconds 300
             displayName: 'Pause for Verification'
+            condition: eq('${{ parameters.pauseForVerification }}', 'true')
           - powershell: |
               Write-Host "SqlUsername: $(SqlUsername)"
               Write-Host "SqlPassword: [REDACTED]"
@@ -218,8 +223,22 @@ stages:
             deploy:
               steps:
                 - powershell: |
+                    Write-Host "Checking environment for deployment..."
+                    Write-Host "Environment: $(System.Environment)"
+                    Write-Host "Stage: $(System.StageName)"
+                  displayName: 'Log Environment Details'
+                - powershell: |
                     Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
                     Start-Sleep -Seconds 30
+                    # Monitor memory usage
+                    $memory = Get-CimInstance Win32_OperatingSystem
+                    $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+                    Write-Host "Free memory: $freeMemoryPercent%"
+                    if ($freeMemoryPercent -lt 2) {
+                        Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+                        throw "Memory too low to proceed"
+                    }
+
                     # Configure dbatools to trust the SQL Server certificate and disable encryption
                     Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
                     Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
@@ -236,6 +255,22 @@ stages:
                         Write-Error "Failed to connect to ${{ parameters.devDb }} on ${{ parameters.devSqlInstance }}: $_"
                         throw "Connection verification failed: $_"
                     }
+
+                    # Verify connection to logging database
+                    Write-Host "Verifying connection to logging database ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}..."
+                    try {
+                        $testQuery = "SELECT 1 AS Test"
+                        Invoke-DbaQuery -SqlInstance "${{ parameters.loggingSqlInstance }}" -Database "${{ parameters.loggingDb }}" -Query $testQuery -SqlCredential $cred -EnableException
+                        Write-Host "Successfully connected to ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}"
+                    }
+                    catch {
+                        Write-Error "Failed to connect to ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}: $_"
+                        throw "Logging database connection failed: $_"
+                    }
+
+                    # List scripts in scriptPath for debugging
+                    Write-Host "Listing all files in ${{ parameters.scriptPath }}..."
+                    Get-ChildItem -Path "${{ parameters.scriptPath }}" -Recurse
 
                     # Define script types to deploy in order
                     $scriptTypes = @("ddl", "dml", "stored_procs")
@@ -314,8 +349,22 @@ stages:
             deploy:
               steps:
                 - powershell: |
+                    Write-Host "Checking environment for deployment..."
+                    Write-Host "Environment: $(System.Environment)"
+                    Write-Host "Stage: $(System.StageName)"
+                  displayName: 'Log Environment Details'
+                - powershell: |
                     Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
                     Start-Sleep -Seconds 30
+                    # Monitor memory usage
+                    $memory = Get-CimInstance Win32_OperatingSystem
+                    $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+                    Write-Host "Free memory: $freeMemoryPercent%"
+                    if ($freeMemoryPercent -lt 2) {
+                        Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+                        throw "Memory too low to proceed"
+                    }
+
                     # Configure dbatools to trust the SQL Server certificate and disable encryption
                     Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
                     Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
@@ -332,6 +381,22 @@ stages:
                         Write-Error "Failed to connect to ${{ parameters.qaDb }} on ${{ parameters.qaSqlInstance }}: $_"
                         throw "Connection verification failed: $_"
                     }
+
+                    # Verify connection to logging database
+                    Write-Host "Verifying connection to logging database ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}..."
+                    try {
+                        $testQuery = "SELECT 1 AS Test"
+                        Invoke-DbaQuery -SqlInstance "${{ parameters.loggingSqlInstance }}" -Database "${{ parameters.loggingDb }}" -Query $testQuery -SqlCredential $cred -EnableException
+                        Write-Host "Successfully connected to ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}"
+                    }
+                    catch {
+                        Write-Error "Failed to connect to ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}: $_"
+                        throw "Logging database connection failed: $_"
+                    }
+
+                    # List scripts in scriptPath for debugging
+                    Write-Host "Listing all files in ${{ parameters.scriptPath }}..."
+                    Get-ChildItem -Path "${{ parameters.scriptPath }}" -Recurse
 
                     # Define script types to deploy in order
                     $scriptTypes = @("ddl", "dml", "stored_procs")
@@ -410,8 +475,22 @@ stages:
             deploy:
               steps:
                 - powershell: |
+                    Write-Host "Checking environment for deployment..."
+                    Write-Host "Environment: $(System.Environment)"
+                    Write-Host "Stage: $(System.StageName)"
+                  displayName: 'Log Environment Details'
+                - powershell: |
                     Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
                     Start-Sleep -Seconds 30
+                    # Monitor memory usage
+                    $memory = Get-CimInstance Win32_OperatingSystem
+                    $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+                    Write-Host "Free memory: $freeMemoryPercent%"
+                    if ($freeMemoryPercent -lt 2) {
+                        Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+                        throw "Memory too low to proceed"
+                    }
+
                     # Configure dbatools to trust the SQL Server certificate and disable encryption
                     Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
                     Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
@@ -428,6 +507,22 @@ stages:
                         Write-Error "Failed to connect to ${{ parameters.prodDb }} on ${{ parameters.prodSqlInstance }}: $_"
                         throw "Connection verification failed: $_"
                     }
+
+                    # Verify connection to logging database
+                    Write-Host "Verifying connection to logging database ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}..."
+                    try {
+                        $testQuery = "SELECT 1 AS Test"
+                        Invoke-DbaQuery -SqlInstance "${{ parameters.loggingSqlInstance }}" -Database "${{ parameters.loggingDb }}" -Query $testQuery -SqlCredential $cred -EnableException
+                        Write-Host "Successfully connected to ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}"
+                    }
+                    catch {
+                        Write-Error "Failed to connect to ${{ parameters.loggingDb }} on ${{ parameters.loggingSqlInstance }}: $_"
+                        throw "Logging database connection failed: $_"
+                    }
+
+                    # List scripts in scriptPath for debugging
+                    Write-Host "Listing all files in ${{ parameters.scriptPath }}..."
+                    Get-ChildItem -Path "${{ parameters.scriptPath }}" -Recurse
 
                     # Define script types to deploy in order
                     $scriptTypes = @("ddl", "dml", "stored_procs")
