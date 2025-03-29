@@ -6,7 +6,7 @@ on:
 
 jobs:
   Build:
-    runs-on: windows-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -195,7 +195,7 @@ jobs:
 
   DeployToDev:
     needs: Build
-    runs-on: windows-latest
+    runs-on: self-hosted
     environment: Dev
     steps:
       - name: Checkout code
@@ -337,7 +337,7 @@ jobs:
 
   DeployToQA:
     needs: DeployToDev
-    runs-on: windows-latest
+    runs-on: self-hosted
     environment: QA
     steps:
       - name: Checkout code
@@ -479,7 +479,7 @@ jobs:
 
   DeployToProd:
     needs: DeployToQA
-    runs-on: windows-latest
+    runs-on: self-hosted
     environment: Production
     steps:
       - name: Checkout code
