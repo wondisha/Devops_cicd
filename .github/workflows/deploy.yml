@@ -44,13 +44,44 @@ jobs:
           $loadedModule = Get-Module -Name dbatools
           Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
 
-      - name: Create Validation Database
-        shell: pwsh
-        env:
-          SqlUsername: ${{ secrets.SQL_USERNAME_DEV }}
-          SqlPassword: ${{ secrets.SQL_PASSWORD_DEV }}
-        run: |
-          Write-Host "Creating validation database..."
+          - name: Create Validation Database
+          shell: pwsh
+          env:
+            SqlUsername: ${{ secrets.SQL_USERNAME_DEV }}
+            SqlPassword: ${{ secrets.SQL_PASSWORD_DEV }}
+          run: |
+            Write-Host "Creating validation database..."
+            
+            # Validate that SqlUsername and SqlPassword are not empty
+            if (-not $env:SqlUsername) {
+                Write-Error "The SqlUsername environment variable is empty. Please ensure the SQL_USERNAME_DEV secret is set in GitHub."
+                exit 1
+            }
+            if (-not $env:SqlPassword) {
+                Write-Error "The SqlPassword environment variable is empty. Please ensure the SQL_PASSWORD_DEV secret is set in GitHub."
+                exit 1
+            }
+        
+            # Test connectivity to techpc
+            Write-Host "Testing connectivity to techpc..."
+            Test-NetConnection -ComputerName "techpc" -Port 1433
+        
+            Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+            Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+            $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
+            
+            # Drop the database if it exists to ensure a clean state
+            Write-Host "Dropping ValidationDB if it exists..."
+            $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') BEGIN ALTER DATABASE [ValidationDB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [ValidationDB]; END"
+            try {
+                Invoke-DbaQuery -SqlInstance "techpc" -Query $dropQuery -SqlCredential $cred -EnableException
+                Write-Host "ValidationDB dropped successfully."
+            }
+            catch {
+                Write-Warning "Failed to drop ValidationDB database: $_"
+                throw "Failed to drop ValidationDB: $_"
+            }
+            # ... (rest of the script)
           Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
           Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
           $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
