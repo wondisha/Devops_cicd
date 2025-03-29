@@ -9,7 +9,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: List Files in Sources Directory
         shell: pwsh
@@ -189,7 +189,7 @@ jobs:
           Write-Host "ValidationDB database dropped successfully."
 
       - name: Publish Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
          name: Deploy SQL Script
 
@@ -202,7 +202,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: List Files in Sources Directory
         shell: pwsh
@@ -382,7 +382,7 @@ jobs:
           Write-Host "ValidationDB database dropped successfully."
 
       - name: Publish Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: sql-scripts
           path: scripts/releases
@@ -393,10 +393,10 @@ jobs:
     environment: Dev
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sql-scripts
           path: scripts/releases
@@ -535,10 +535,10 @@ jobs:
     environment: QA
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sql-scripts
           path: scripts/releases
@@ -677,10 +677,10 @@ jobs:
     environment: Production
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sql-scripts
           path: scripts/releases
@@ -708,10 +708,10 @@ jobs:
     environment: Dev
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sql-scripts
           path: scripts/releases
@@ -850,10 +850,10 @@ jobs:
     environment: QA
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sql-scripts
           path: scripts/releases
@@ -992,10 +992,10 @@ jobs:
     environment: Production
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sql-scripts
           path: scripts/releases
