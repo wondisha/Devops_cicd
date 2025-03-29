@@ -32,56 +32,33 @@ jobs:
       - name: Update dbatools
         shell: pwsh
         run: |
-          Write-Host "Updating dbatools to the latest version..."
-          Uninstall-Module -Name dbatools -AllVersions -Force -ErrorAction Continue
-          Remove-Item -Path "C:\Program Files\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "C:\Program Files (x86)\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "$env:USERPROFILE\Documents\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
-          Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -SkipPublisherCheck -ErrorAction Stop
+          Write-Host "Ensuring dbatools is loaded..."
           Import-Module -Name dbatools -Force -ErrorAction Stop
-          $updatedModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
-          Write-Host "Updated dbatools version: $($updatedModule.Version) at $($updatedModule.ModuleBase)"
           $loadedModule = Get-Module -Name dbatools
           Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
 
-          - name: Create Validation Database
-          shell: pwsh
-          env:
-            SqlUsername: ${{ secrets.SQL_USERNAME_DEV }}
-            SqlPassword: ${{ secrets.SQL_PASSWORD_DEV }}
-          run: |
-            Write-Host "Creating validation database..."
-            
-            # Validate that SqlUsername and SqlPassword are not empty
-            if (-not $env:SqlUsername) {
-                Write-Error "The SqlUsername environment variable is empty. Please ensure the SQL_USERNAME_DEV secret is set in GitHub."
-                exit 1
-            }
-            if (-not $env:SqlPassword) {
-                Write-Error "The SqlPassword environment variable is empty. Please ensure the SQL_PASSWORD_DEV secret is set in GitHub."
-                exit 1
-            }
-        
-            # Test connectivity to techpc
-            Write-Host "Testing connectivity to techpc..."
-            Test-NetConnection -ComputerName "techpc" -Port 1433
-        
-            Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
-            Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
-            $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
-            
-            # Drop the database if it exists to ensure a clean state
-            Write-Host "Dropping ValidationDB if it exists..."
-            $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') BEGIN ALTER DATABASE [ValidationDB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [ValidationDB]; END"
-            try {
-                Invoke-DbaQuery -SqlInstance "techpc" -Query $dropQuery -SqlCredential $cred -EnableException
-                Write-Host "ValidationDB dropped successfully."
-            }
-            catch {
-                Write-Warning "Failed to drop ValidationDB database: $_"
-                throw "Failed to drop ValidationDB: $_"
-            }
-            # ... (rest of the script)
+      - name: Create Validation Database
+        shell: pwsh
+        env:
+          SqlUsername: ${{ secrets.SQL_USERNAME_DEV }}
+          SqlPassword: ${{ secrets.SQL_PASSWORD_DEV }}
+        run: |
+          Write-Host "Creating validation database..."
+          
+          # Validate that SqlUsername and SqlPassword are not empty
+          if (-not $env:SqlUsername) {
+              Write-Error "The SqlUsername environment variable is empty. Please ensure the SQL_USERNAME_DEV secret is set in GitHub."
+              exit 1
+          }
+          if (-not $env:SqlPassword) {
+              Write-Error "The SqlPassword environment variable is empty. Please ensure the SQL_PASSWORD_DEV secret is set in GitHub."
+              exit 1
+          }
+
+          # Test connectivity to techpc
+          Write-Host "Testing connectivity to techpc..."
+          Test-NetConnection -ComputerName "techpc" -Port 1433
+
           Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
           Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
           $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
@@ -253,6 +230,17 @@ jobs:
         run: |
           Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
           Start-Sleep -Seconds 30
+
+          # Validate that SqlUsername and SqlPassword are not empty
+          if (-not $env:SqlUsername) {
+              Write-Error "The SqlUsername environment variable is empty. Please ensure the SQL_USERNAME_DEV secret is set in GitHub."
+              exit 1
+          }
+          if (-not $env:SqlPassword) {
+              Write-Error "The SqlPassword environment variable is empty. Please ensure the SQL_PASSWORD_DEV secret is set in GitHub."
+              exit 1
+          }
+
           # Monitor memory usage over time
           Write-Host "Monitoring memory usage for 60 seconds..."
           for ($i = 0; $i -lt 12; $i++) {
@@ -395,6 +383,17 @@ jobs:
         run: |
           Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
           Start-Sleep -Seconds 30
+
+          # Validate that SqlUsername and SqlPassword are not empty
+          if (-not $env:SqlUsername) {
+              Write-Error "The SqlUsername environment variable is empty. Please ensure the SQL_USERNAME_QA secret is set in GitHub."
+              exit 1
+          }
+          if (-not $env:SqlPassword) {
+              Write-Error "The SqlPassword environment variable is empty. Please ensure the SQL_PASSWORD_QA secret is set in GitHub."
+              exit 1
+          }
+
           # Monitor memory usage over time
           Write-Host "Monitoring memory usage for 60 seconds..."
           for ($i = 0; $i -lt 12; $i++) {
@@ -537,6 +536,17 @@ jobs:
         run: |
           Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
           Start-Sleep -Seconds 30
+
+          # Validate that SqlUsername and SqlPassword are not empty
+          if (-not $env:SqlUsername) {
+              Write-Error "The SqlUsername environment variable is empty. Please ensure the SQL_USERNAME_PROD secret is set in GitHub."
+              exit 1
+          }
+          if (-not $env:SqlPassword) {
+              Write-Error "The SqlPassword environment variable is empty. Please ensure the SQL_PASSWORD_PROD secret is set in GitHub."
+              exit 1
+          }
+
           # Monitor memory usage over time
           Write-Host "Monitoring memory usage for 60 seconds..."
           for ($i = 0; $i -lt 12; $i++) {
