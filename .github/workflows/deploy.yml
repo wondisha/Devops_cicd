@@ -1,4 +1,4 @@
-name: Deploy SQL Scripts
+name: Deploy SQL Script
 
 on:
   push:
