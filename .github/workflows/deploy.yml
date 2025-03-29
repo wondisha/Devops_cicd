@@ -1,0 +1,509 @@
+name: Deploy SQL Scripts
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  Build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: List Files in Sources Directory
+        shell: pwsh
+        run: |
+          Write-Host "Current working directory: $PWD"
+          Write-Host "Listing files in ${env:GITHUB_WORKSPACE}:"
+          Get-ChildItem -Path "${env:GITHUB_WORKSPACE}" -Recurse
+
+      - name: List Environment Variables
+        shell: pwsh
+        run: |
+          Write-Host "Listing environment variables:"
+          Get-ChildItem env: | Where-Object { $_.Name -like "*SQL*" }
+
+      - name: Debug Variables
+        shell: pwsh
+        working-directory: ${{ env.GITHUB_WORKSPACE }}
+        run: |
+          .\debug-variables.ps1
+
+      - name: Update dbatools
+        shell: pwsh
+        run: |
+          Write-Host "Updating dbatools to the latest version..."
+          Uninstall-Module -Name dbatools -AllVersions -Force -ErrorAction Continue
+          Remove-Item -Path "C:\Program Files\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "C:\Program Files (x86)\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$env:USERPROFILE\Documents\WindowsPowerShell\Modules\dbatools" -Recurse -Force -ErrorAction SilentlyContinue
+          Install-Module -Name dbatools -Force -Scope CurrentUser -AllowClobber -SkipPublisherCheck -ErrorAction Stop
+          Import-Module -Name dbatools -Force -ErrorAction Stop
+          $updatedModule = Get-Module -ListAvailable -Name dbatools | Sort-Object Version -Descending | Select-Object -First 1
+          Write-Host "Updated dbatools version: $($updatedModule.Version) at $($updatedModule.ModuleBase)"
+          $loadedModule = Get-Module -Name dbatools
+          Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
+
+      - name: Create Validation Database
+        shell: pwsh
+        env:
+          SqlUsername: ${{ secrets.SQL_USERNAME_DEV }}
+          SqlPassword: ${{ secrets.SQL_PASSWORD_DEV }}
+        run: |
+          Write-Host "Creating validation database..."
+          Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+          Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+          $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
+          
+          # Drop the database if it exists to ensure a clean state
+          Write-Host "Dropping ValidationDB if it exists..."
+          $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') BEGIN ALTER DATABASE [ValidationDB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [ValidationDB]; END"
+          try {
+              Invoke-DbaQuery -SqlInstance "techpc" -Query $dropQuery -SqlCredential $cred -EnableException
+              Write-Host "ValidationDB dropped successfully."
+          }
+          catch {
+              Write-Warning "Failed to drop ValidationDB database: $_"
+              throw "Failed to drop ValidationDB: $_"
+          }
+
+          # Manually delete the database files if they still exist
+          $mdfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf"
+          $ldfPath = "D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf"
+          if (Test-Path $mdfPath) {
+              Write-Host "Deleting existing ValidationDB.mdf file..."
+              Remove-Item -Path $mdfPath -Force -ErrorAction Stop
+          }
+          if (Test-Path $ldfPath) {
+              Write-Host "Deleting existing ValidationDB_log.ldf file..."
+              Remove-Item -Path $ldfPath -Force -ErrorAction Stop
+          }
+
+          # Create the database with explicit file locations
+          Write-Host "Creating ValidationDB database..."
+          $createQuery = "CREATE DATABASE [ValidationDB] ON (NAME = ValidationDB, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB.mdf') LOG ON (NAME = ValidationDB_log, FILENAME = 'D:\SQLData\MSSQL16.MSSQLSERVER\MSSQL\DATA\ValidationDB_log.ldf')"
+          try {
+              Invoke-DbaQuery -SqlInstance "techpc" -Query $createQuery -SqlCredential $cred -EnableException
+              Write-Host "ValidationDB database created successfully."
+          }
+          catch {
+              Write-Error "Failed to create ValidationDB database: $_"
+              throw "Failed to create ValidationDB: $_"
+          }
+
+          # Verify the database exists
+          Write-Host "Verifying ValidationDB database exists..."
+          $checkQuery = "SELECT name FROM sys.databases WHERE name = 'ValidationDB'"
+          $result = Invoke-DbaQuery -SqlInstance "techpc" -Query $checkQuery -SqlCredential $cred -EnableException
+          if ($result -and $result.name -eq 'ValidationDB') {
+              Write-Host "ValidationDB database exists: $($result.name)"
+          }
+          else {
+              Write-Error "ValidationDB database was not created successfully!"
+              throw "Database creation verification failed: ValidationDB not found"
+          }
+
+      - name: Validate Scripts
+        shell: pwsh
+        env:
+          SqlUsername: ${{ secrets.SQL_USERNAME_DEV }}
+          SqlPassword: ${{ secrets.SQL_PASSWORD_DEV }}
+        run: |
+          Write-Host "SqlUsername: ${env:SqlUsername}"
+          Write-Host "SqlPassword: [REDACTED]"
+          # Monitor memory usage over time
+          Write-Host "Monitoring memory usage for 60 seconds..."
+          for ($i = 0; $i -lt 12; $i++) {
+              $memory = Get-CimInstance Win32_OperatingSystem
+              $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+              Write-Host "Memory check $i - Free memory: $freeMemoryPercent%"
+              Start-Sleep -Seconds 5
+          }
+          # Check memory usage
+          $memory = Get-CimInstance Win32_OperatingSystem
+          $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+          Write-Host "Final free memory: $freeMemoryPercent%"
+          if ($freeMemoryPercent -lt 1) {
+              Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+              exit 1
+          }
+
+          # Ensure dbatools is loaded
+          Import-Module -Name dbatools -Force -ErrorAction Stop
+          $loadedModule = Get-Module -Name dbatools
+          Write-Host "Loaded dbatools version: $($loadedModule.Version) at $($loadedModule.ModuleBase)"
+
+          # Configure dbatools to trust the SQL Server certificate and disable encryption
+          Write-Host "Configuring dbatools to trust SQL Server certificate..."
+          Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+          Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+
+          # Create credential object
+          $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
+
+          # Verify connection to ValidationDB
+          Write-Host "Verifying connection to ValidationDB..."
+          $checkQuery = "SELECT DB_NAME() AS CurrentDatabase;"
+          $result = Invoke-DbaQuery -SqlInstance "techpc" -Database "ValidationDB" -Query $checkQuery -SqlCredential $cred -EnableException
+          Write-Host "Connected to database: $($result.CurrentDatabase)"
+
+          # Define script types to validate in order
+          $scriptTypes = @("ddl", "dml", "stored_procs")
+
+          foreach ($type in $scriptTypes) {
+              Write-Host "Looking for $type scripts in scripts/releases/$type..."
+              $scripts = Get-ChildItem -Path "scripts/releases/$type" -Filter "*.sql" -ErrorAction SilentlyContinue
+              if (-not $scripts) {
+                  Write-Host "No $type scripts found in scripts/releases/$type."
+                  continue
+              }
+              Write-Host "Found $($scripts.Count) $type script(s):"
+              $scripts | ForEach-Object { Write-Host $_.Name }
+              foreach ($script in $scripts) {
+                  Write-Host "Validating: $script"
+                  try {
+                      Invoke-DbaQuery -SqlInstance "techpc" -Database "ValidationDB" -File $script.FullName -SqlCredential $cred -EnableException
+                      Write-Host "Successfully validated $script"
+                  }
+                  catch {
+                      Write-Error "Failed to validate $script : $_"
+                      throw
+                  }
+                  [System.GC]::Collect()
+              }
+          }
+
+      - name: Clean Up Validation Database
+        shell: pwsh
+        env:
+          SqlUsername: ${{ secrets.SQL_USERNAME_DEV }}
+          SqlPassword: ${{ secrets.SQL_PASSWORD_DEV }}
+        run: |
+          Write-Host "Cleaning up validation database..."
+          Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+          Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+          $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
+          $dropQuery = "IF EXISTS (SELECT * FROM sys.databases WHERE name = 'ValidationDB') DROP DATABASE [ValidationDB];"
+          Invoke-DbaQuery -SqlInstance "techpc" -Query $dropQuery -SqlCredential $cred -EnableException
+          Write-Host "ValidationDB database dropped successfully."
+
+      - name: Publish Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: sql-scripts
+          path: scripts/releases
+
+  DeployToDev:
+    needs: Build
+    runs-on: windows-latest
+    environment: Dev
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: sql-scripts
+          path: scripts/releases
+
+      - name: Log Environment Details
+        shell: pwsh
+        run: |
+          Write-Host "Checking environment for deployment..."
+          Write-Host "Environment: Dev"
+          Write-Host "Stage: DeployToDev"
+
+      - name: Deploy Scripts to Dev
+        shell: pwsh
+        env:
+          SqlUsername: ${{ secrets.SQL_USERNAME_DEV }}
+          SqlPassword: ${{ secrets.SQL_PASSWORD_DEV }}
+        run: |
+          Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
+          Start-Sleep -Seconds 30
+          # Monitor memory usage over time
+          Write-Host "Monitoring memory usage for 60 seconds..."
+          for ($i = 0; $i -lt 12; $i++) {
+              $memory = Get-CimInstance Win32_OperatingSystem
+              $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+              Write-Host "Memory check $i - Free memory: $freeMemoryPercent%"
+              Start-Sleep -Seconds 5
+          }
+          # Check memory usage
+          $memory = Get-CimInstance Win32_OperatingSystem
+          $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+          Write-Host "Final free memory: $freeMemoryPercent%"
+          if ($freeMemoryPercent -lt 1) {
+              Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+              throw "Memory too low to proceed"
+          }
+
+          # Configure dbatools to trust the SQL Server certificate and disable encryption
+          Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+          Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+          $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
+          
+          # Verify connection to SQL Server and access to target database
+          Write-Host "Verifying connection to SQL Server and access to devDb..."
+          try {
+              $testQuery = "SELECT 1 AS Test"
+              Invoke-DbaQuery -SqlInstance "techpc" -Database "devDb" -Query $testQuery -SqlCredential $cred -EnableException
+              Write-Host "Successfully connected to devDb on techpc"
+          }
+          catch {
+              Write-Error "Failed to connect to devDb on techpc: $_"
+              throw "Connection verification failed: $_"
+          }
+
+          # Verify connection to logging database
+          Write-Host "Verifying connection to logging database DeploymentLog on techpc..."
+          try {
+              $testQuery = "SELECT 1 AS Test"
+              Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $testQuery -SqlCredential $cred -EnableException
+              Write-Host "Successfully connected to DeploymentLog on techpc"
+          }
+          catch {
+              Write-Error "Failed to connect to DeploymentLog on techpc: $_"
+              throw "Logging database connection failed: $_"
+          }
+
+          # List scripts in scriptPath for debugging
+          Write-Host "Listing all files in scripts/releases..."
+          Get-ChildItem -Path "scripts/releases" -Recurse
+
+          # Define script types to deploy in order
+          $scriptTypes = @("ddl", "dml", "stored_procs")
+
+          foreach ($type in $scriptTypes) {
+              Write-Host "Deploying $type scripts to devDb..."
+              $scripts = Get-ChildItem -Path "scripts/releases/$type" -Filter "*.sql" -ErrorAction SilentlyContinue
+              if (-not $scripts) {
+                  Write-Host "No $type scripts found in scripts/releases/$type."
+                  continue
+              }
+              Write-Host "Found $($scripts.Count) $type script(s):"
+              $scripts | ForEach-Object { Write-Host $_.Name }
+              foreach ($script in $scripts) {
+                  Write-Host "Deploying: $script to devDb"
+                  $retryCount = 3
+                  $retryDelaySeconds = 10
+                  $success = $false
+                  
+                  for ($i = 0; $i -lt $retryCount; $i++) {
+                      try {
+                          Invoke-DbaQuery -SqlInstance "techpc" -Database "devDb" -File $script.FullName -SqlCredential $cred -EnableException
+                          Write-Host "Successfully deployed $script to devDb"
+                          $success = $true
+                          # Log success to DeploymentLog
+                          $logQuery = "INSERT INTO DeploymentHistory (ScriptName, Environment, DeploymentTime, Status, ErrorMessage) VALUES ('$($script.Name)', 'Dev', GETDATE(), 'Success', NULL)"
+                          Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $logQuery -SqlCredential $cred -EnableException
+                          break
+                      }
+                      catch {
+                          Write-Warning "Failed to deploy $script on attempt $($i + 1) of $retryCount : $_"
+                          if ($i -eq ($retryCount - 1)) {
+                              # Log failure to DeploymentLog
+                              $logQuery = "INSERT INTO DeploymentHistory (ScriptName, Environment, DeploymentTime, Status, ErrorMessage) VALUES ('$($script.Name)', 'Dev', GETDATE(), 'Failed', '$($_.Exception.Message)')"
+                              Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $logQuery -SqlCredential $cred -EnableException
+                              # Attempt rollback
+                              $rollbackScript = $script.BaseName + "_rollback.sql"
+                              $rollbackPath = Join-Path "scripts/releases/$type" $rollbackScript
+                              if (Test-Path $rollbackPath) {
+                                  Write-Host "Deployment failed. Executing rollback script: $rollbackScript"
+                                  try {
+                                      Invoke-DbaQuery -SqlInstance "techpc" -Database "devDb" -File $rollbackPath -SqlCredential $cred -EnableException
+                                      Write-Host "Rollback successful for $script"
+                                      $logQuery = "INSERT INTO DeploymentHistory (ScriptName, Environment, DeploymentTime, Status, ErrorMessage) VALUES ('$rollbackScript', 'Dev', GETDATE(), 'Rollback', NULL)"
+                                      Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $logQuery -SqlCredential $cred -EnableException
+                                  }
+                                  catch {
+                                      Write-Error "Rollback failed for $script : $_"
+                                      $logQuery = "INSERT INTO DeploymentHistory (ScriptName, Environment, DeploymentTime, Status, ErrorMessage) VALUES ('$rollbackScript', 'Dev', GETDATE(), 'Rollback Failed', '$($_.Exception.Message)')"
+                                      Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $logQuery -SqlCredential $cred -EnableException
+                                  }
+                              }
+                              else {
+                                  Write-Warning "Rollback script $rollbackScript not found."
+                              }
+                              throw "Failed to deploy $script after $retryCount attempts: $_"
+                          }
+                          Write-Host "Retrying in $retryDelaySeconds seconds..."
+                          Start-Sleep -Seconds $retryDelaySeconds
+                      }
+                  }
+              }
+          }
+
+  DeployToQA:
+    needs: DeployToDev
+    runs-on: windows-latest
+    environment: QA
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: sql-scripts
+          path: scripts/releases
+
+      - name: Log Environment Details
+        shell: pwsh
+        run: |
+          Write-Host "Checking environment for deployment..."
+          Write-Host "Environment: QA"
+          Write-Host "Stage: DeployToQA"
+
+      - name: Deploy Scripts to QA
+        shell: pwsh
+        env:
+          SqlUsername: ${{ secrets.SQL_USERNAME_QA }}
+          SqlPassword: ${{ secrets.SQL_PASSWORD_QA }}
+        run: |
+          Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
+          Start-Sleep -Seconds 30
+          # Monitor memory usage over time
+          Write-Host "Monitoring memory usage for 60 seconds..."
+          for ($i = 0; $i -lt 12; $i++) {
+              $memory = Get-CimInstance Win32_OperatingSystem
+              $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+              Write-Host "Memory check $i - Free memory: $freeMemoryPercent%"
+              Start-Sleep -Seconds 5
+          }
+          # Check memory usage
+          $memory = Get-CimInstance Win32_OperatingSystem
+          $freeMemoryPercent = ($memory.FreePhysicalMemory / $memory.TotalVisibleMemorySize) * 100
+          Write-Host "Final free memory: $freeMemoryPercent%"
+          if ($freeMemoryPercent -lt 1) {
+              Write-Error "Memory too low to proceed! Free memory: $freeMemoryPercent%"
+              throw "Memory too low to proceed"
+          }
+
+          # Configure dbatools to trust the SQL Server certificate and disable encryption
+          Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register
+          Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
+          $cred = New-Object System.Management.Automation.PSCredential ("${env:SqlUsername}", (ConvertTo-SecureString "${env:SqlPassword}" -AsPlainText -Force))
+          
+          # Verify connection to SQL Server and access to target database
+          Write-Host "Verifying connection to SQL Server and access to qaDb..."
+          try {
+              $testQuery = "SELECT 1 AS Test"
+              Invoke-DbaQuery -SqlInstance "techpc" -Database "qaDb" -Query $testQuery -SqlCredential $cred -EnableException
+              Write-Host "Successfully connected to qaDb on techpc"
+          }
+          catch {
+              Write-Error "Failed to connect to qaDb on techpc: $_"
+              throw "Connection verification failed: $_"
+          }
+
+          # Verify connection to logging database
+          Write-Host "Verifying connection to logging database DeploymentLog on techpc..."
+          try {
+              $testQuery = "SELECT 1 AS Test"
+              Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $testQuery -SqlCredential $cred -EnableException
+              Write-Host "Successfully connected to DeploymentLog on techpc"
+          }
+          catch {
+              Write-Error "Failed to connect to DeploymentLog on techpc: $_"
+              throw "Logging database connection failed: $_"
+          }
+
+          # List scripts in scriptPath for debugging
+          Write-Host "Listing all files in scripts/releases..."
+          Get-ChildItem -Path "scripts/releases" -Recurse
+
+          # Define script types to deploy in order
+          $scriptTypes = @("ddl", "dml", "stored_procs")
+
+          foreach ($type in $scriptTypes) {
+              Write-Host "Deploying $type scripts to qaDb..."
+              $scripts = Get-ChildItem -Path "scripts/releases/$type" -Filter "*.sql" -ErrorAction SilentlyContinue
+              if (-not $scripts) {
+                  Write-Host "No $type scripts found in scripts/releases/$type."
+                  continue
+              }
+              Write-Host "Found $($scripts.Count) $type script(s):"
+              $scripts | ForEach-Object { Write-Host $_.Name }
+              foreach ($script in $scripts) {
+                  Write-Host "Deploying: $script to qaDb"
+                  $retryCount = 3
+                  $retryDelaySeconds = 10
+                  $success = $false
+                  
+                  for ($i = 0; $i -lt $retryCount; $i++) {
+                      try {
+                          Invoke-DbaQuery -SqlInstance "techpc" -Database "qaDb" -File $script.FullName -SqlCredential $cred -EnableException
+                          Write-Host "Successfully deployed $script to qaDb"
+                          $success = $true
+                          # Log success to DeploymentLog
+                          $logQuery = "INSERT INTO DeploymentHistory (ScriptName, Environment, DeploymentTime, Status, ErrorMessage) VALUES ('$($script.Name)', 'QA', GETDATE(), 'Success', NULL)"
+                          Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $logQuery -SqlCredential $cred -EnableException
+                          break
+                      }
+                      catch {
+                          Write-Warning "Failed to deploy $script on attempt $($i + 1) of $retryCount : $_"
+                          if ($i -eq ($retryCount - 1)) {
+                              # Log failure to DeploymentLog
+                              $logQuery = "INSERT INTO DeploymentHistory (ScriptName, Environment, DeploymentTime, Status, ErrorMessage) VALUES ('$($script.Name)', 'QA', GETDATE(), 'Failed', '$($_.Exception.Message)')"
+                              Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $logQuery -SqlCredential $cred -EnableException
+                              # Attempt rollback
+                              $rollbackScript = $script.BaseName + "_rollback.sql"
+                              $rollbackPath = Join-Path "scripts/releases/$type" $rollbackScript
+                              if (Test-Path $rollbackPath) {
+                                  Write-Host "Deployment failed. Executing rollback script: $rollbackScript"
+                                  try {
+                                      Invoke-DbaQuery -SqlInstance "techpc" -Database "qaDb" -File $rollbackPath -SqlCredential $cred -EnableException
+                                      Write-Host "Rollback successful for $script"
+                                      $logQuery = "INSERT INTO DeploymentHistory (ScriptName, Environment, DeploymentTime, Status, ErrorMessage) VALUES ('$rollbackScript', 'QA', GETDATE(), 'Rollback', NULL)"
+                                      Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $logQuery -SqlCredential $cred -EnableException
+                                  }
+                                  catch {
+                                      Write-Error "Rollback failed for $script : $_"
+                                      $logQuery = "INSERT INTO DeploymentHistory (ScriptName, Environment, DeploymentTime, Status, ErrorMessage) VALUES ('$rollbackScript', 'QA', GETDATE(), 'Rollback Failed', '$($_.Exception.Message)')"
+                                      Invoke-DbaQuery -SqlInstance "techpc" -Database "DeploymentLog" -Query $logQuery -SqlCredential $cred -EnableException
+                                  }
+                              }
+                              else {
+                                  Write-Warning "Rollback script $rollbackScript not found."
+                              }
+                              throw "Failed to deploy $script after $retryCount attempts: $_"
+                          }
+                          Write-Host "Retrying in $retryDelaySeconds seconds..."
+                          Start-Sleep -Seconds $retryDelaySeconds
+                      }
+                  }
+              }
+          }
+
+  DeployToProd:
+    needs: DeployToQA
+    runs-on: windows-latest
+    environment: Production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: sql-scripts
+          path: scripts/releases
+
+      - name: Log Environment Details
+        shell: pwsh
+        run: |
+          Write-Host "Checking environment for deployment..."
+          Write-Host "Environment: Production"
+          Write-Host "Stage: DeployToProd"
+
+      - name: Deploy Scripts to Production
+        shell: pwsh
+        env:
+          SqlUsername: ${{ secrets.SQL_USERNAME_PROD }}
+          SqlPassword: ${{ secrets.SQL_PASSWORD_PROD }}
+        run: |
+          Write-Host "Waiting 30 seconds to allow SQL Server to stabilize..."
+         
