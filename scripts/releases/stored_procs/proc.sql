@@ -1,0 +1,8 @@
+CREATE PROCEDURE Multiply
+@A INT,
+@B INT,
+@Result INT OUTPUT
+AS
+BEGIN
+SET @Result = @A * @B;
+END;
