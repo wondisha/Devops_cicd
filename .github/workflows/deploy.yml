@@ -110,5 +110,5 @@ jobs:
         shell: cmd
         run: |
           for %%f in (scripts\releases\ddl\*.sql scripts\releases\dml\*.sql scripts\releases\stored_procs\*.sql) do (
-            sqlcmd -S prod-sql -d prodDb -U ${{ secrets.DB_USER }} -P ${{ secrets.DB_PASSWORD }} -i "%%f"
+            sqlcmd -S prod-sql -d prodDb -U ${{ secrets.SQL_USER_PASSWORD_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
           )
