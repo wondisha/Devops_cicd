@@ -9,6 +9,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Clear Runner Cache
+        shell: cmd
         run: |
           echo "Clearing runner cache..."
           if exist "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd" (
