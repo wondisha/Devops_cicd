@@ -12,29 +12,36 @@ jobs:
         shell: cmd
         run: |
           echo "Clearing runner cache..."
-          if exist "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd" (
-            rmdir /s /q "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd"
+          if exist "D:\actions-runner\_work\Devops_cicd\Devops_cicd" (
+            rmdir /s /q "D:\actions-runner\_work\Devops_cicd\Devops_cicd"
           )
       - uses: actions/checkout@v3
         with:
           clean: true
           fetch-depth: 0
-      - name: Validate Scripts
+      - name: Debug Shell
+        shell: cmd
         run: |
-          echo "Looking for ddl scripts in scripts\\releases\\ddl\\..."
-          for %%f in (scripts\\releases\\ddl\\*.sql) do (
+          echo "Verifying shell..."
+          ver
+          echo "Shell should be cmd, not PowerShell"
+      - name: Validate Scripts
+        shell: cmd
+        run: |
+          echo "Looking for ddl scripts in scripts\releases\ddl\..."
+          for %%f in (scripts\releases\ddl\*.sql) do (
             echo "Validating: %%f"
             sqlcmd -S prod-sql -d ValidationDB -U ${{ secrets.DB_USER }} -P ${{ secrets.DB_PASSWORD }} -i "%%f"
             echo "Successfully validated %%f"
           )
-          echo "Looking for dml scripts in scripts\\releases\\dml\\..."
-          for %%f in (scripts\\releases\\dml\\*.sql) do (
+          echo "Looking for dml scripts in scripts\releases\dml\..."
+          for %%f in (scripts\releases\dml\*.sql) do (
             echo "Validating: %%f"
             sqlcmd -S prod-sql -d ValidationDB -U ${{ secrets.DB_USER }} -P ${{ secrets.DB_PASSWORD }} -i "%%f"
             echo "Successfully validated %%f"
           )
-          echo "Looking for stored_procs scripts in scripts\\releases\\stored_procs\\..."
-          for %%f in (scripts\\releases\\stored_procs\\*.sql) do (
+          echo "Looking for stored_procs scripts in scripts\releases\stored_procs\..."
+          for %%f in (scripts\releases\stored_procs\*.sql) do (
             echo "Validating: %%f"
             sqlcmd -S prod-sql -d ValidationDB -U ${{ secrets.DB_USER }} -P ${{ secrets.DB_PASSWORD }} -i "%%f"
             echo "Successfully validated %%f"
@@ -45,18 +52,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Clear Runner Cache
+        shell: cmd
         run: |
           echo "Clearing runner cache..."
-          if exist "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd" (
-            rmdir /s /q "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd"
+          if exist "D:\actions-runner\_work\Devops_cicd\Devops_cicd" (
+            rmdir /s /q "D:\actions-runner\_work\Devops_cicd\Devops_cicd"
           )
       - uses: actions/checkout@v3
         with:
           clean: true
           fetch-depth: 0
       - name: Deploy to Dev
+        shell: cmd
         run: |
-          for %%f in (scripts\\releases\\ddl\\*.sql scripts\\releases\\dml\\*.sql scripts\\releases\\stored_procs\\*.sql) do (
+          for %%f in (scripts\releases\ddl\*.sql scripts\releases\dml\*.sql scripts\releases\stored_procs\*.sql) do (
             sqlcmd -S prod-sql -d devDb -U ${{ secrets.DB_USER }} -P ${{ secrets.DB_PASSWORD }} -i "%%f"
           )
 
@@ -65,18 +74,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Clear Runner Cache
+        shell: cmd
         run: |
           echo "Clearing runner cache..."
-          if exist "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd" (
-            rmdir /s /q "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd"
+          if exist "D:\actions-runner\_work\Devops_cicd\Devops_cicd" (
+            rmdir /s /q "D:\actions-runner\_work\Devops_cicd\Devops_cicd"
           )
       - uses: actions/checkout@v3
         with:
           clean: true
           fetch-depth: 0
       - name: Deploy to QA
+        shell: cmd
         run: |
-          for %%f in (scripts\\releases\\ddl\\*.sql scripts\\releases\\dml\\*.sql scripts\\releases\\stored_procs\\*.sql) do (
+          for %%f in (scripts\releases\ddl\*.sql scripts\releases\dml\*.sql scripts\releases\stored_procs\*.sql) do (
             sqlcmd -S prod-sql -d qaDb -U ${{ secrets.DB_USER }} -P ${{ secrets.DB_PASSWORD }} -i "%%f"
           )
 
@@ -85,17 +96,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Clear Runner Cache
+        shell: cmd
         run: |
           echo "Clearing runner cache..."
-          if exist "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd" (
-            rmdir /s /q "D:\\actions-runner\\_work\\Devops_cicd\\Devops_cicd"
+          if exist "D:\actions-runner\_work\Devops_cicd\Devops_cicd" (
+            rmdir /s /q "D:\actions-runner\_work\Devops_cicd\Devops_cicd"
           )
       - uses: actions/checkout@v3
         with:
           clean: true
           fetch-depth: 0
       - name: Deploy to Prod
+        shell: cmd
         run: |
-          for %%f in (scripts\\releases\\ddl\\*.sql scripts\\releases\\dml\\*.sql scripts\\releases\\stored_procs\\*.sql) do (
+          for %%f in (scripts\releases\ddl\*.sql scripts\releases\dml\*.sql scripts\releases\stored_procs\*.sql) do (
             sqlcmd -S prod-sql -d prodDb -U ${{ secrets.DB_USER }} -P ${{ secrets.DB_PASSWORD }} -i "%%f"
           )
