@@ -25,25 +25,61 @@ jobs:
           echo "Verifying shell..."
           ver
           echo "Shell should be cmd, not PowerShell"
+      - name: Debug Secrets
+        shell: cmd
+        run: |
+          echo "Verifying secrets..."
+          if "%SQL_USERNAME_DEV%"=="" (
+            echo "SQL_USERNAME_DEV secret is not set or empty"
+          ) else (
+            echo "SQL_USERNAME_DEV secret is set"
+          )
+          if "%SQL_PASSWORD_DEV%"=="" (
+            echo "SQL_PASSWORD_DEV secret is not set or empty"
+          ) else (
+            echo "SQL_PASSWORD_DEV secret is set"
+          )
+        env:
+          SQL_USERNAME_DEV: ${{ secrets.SQL_USERNAME_DEV }}
+          SQL_PASSWORD_DEV: ${{ secrets.SQL_PASSWORD_DEV }}
+      - name: Test SQL Server Connectivity
+        shell: cmd
+        run: |
+          echo "Testing connectivity to techpc..."
+          ping techpc
+          echo "Testing port 1433 (default SQL Server port)..."
+          powershell -Command "Test-NetConnection -ComputerName techpc -Port 1433"
       - name: Validate Scripts
         shell: cmd
         run: |
           echo "Looking for ddl scripts in scripts\releases\ddl\..."
           for %%f in (scripts\releases\ddl\*.sql) do (
             echo "Validating: %%f"
-            sqlcmd -S prod-sql -d ValidationDB -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            sqlcmd -S techpc -d ValidationDB -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            if errorlevel 1 (
+              echo "Failed to validate %%f"
+              exit /b 1
+            )
             echo "Successfully validated %%f"
           )
           echo "Looking for dml scripts in scripts\releases\dml\..."
           for %%f in (scripts\releases\dml\*.sql) do (
             echo "Validating: %%f"
-            sqlcmd -S prod-sql -d ValidationDB -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            sqlcmd -S techpc -d ValidationDB -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            if errorlevel 1 (
+              echo "Failed to validate %%f"
+              exit /b 1
+            )
             echo "Successfully validated %%f"
           )
           echo "Looking for stored_procs scripts in scripts\releases\stored_procs\..."
           for %%f in (scripts\releases\stored_procs\*.sql) do (
             echo "Validating: %%f"
-            sqlcmd -S prod-sql -d ValidationDB -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            sqlcmd -S techpc -d ValidationDB -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            if errorlevel 1 (
+              echo "Failed to validate %%f"
+              exit /b 1
+            )
             echo "Successfully validated %%f"
           )
 
@@ -66,7 +102,11 @@ jobs:
         shell: cmd
         run: |
           for %%f in (scripts\releases\ddl\*.sql scripts\releases\dml\*.sql scripts\releases\stored_procs\*.sql) do (
-            sqlcmd -S prod-sql -d devDb -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            sqlcmd -S techpc -d devDb -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            if errorlevel 1 (
+              echo "Failed to deploy %%f to devDb"
+              exit /b 1
+            )
           )
 
   DeployToQA:
@@ -88,7 +128,11 @@ jobs:
         shell: cmd
         run: |
           for %%f in (scripts\releases\ddl\*.sql scripts\releases\dml\*.sql scripts\releases\stored_procs\*.sql) do (
-            sqlcmd -S prod-sql -d qaDb -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            sqlcmd -S techpc -d qaDb -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            if errorlevel 1 (
+              echo "Failed to deploy %%f to qaDb"
+              exit /b 1
+            )
           )
 
   DeployToProd:
@@ -110,5 +154,9 @@ jobs:
         shell: cmd
         run: |
           for %%f in (scripts\releases\ddl\*.sql scripts\releases\dml\*.sql scripts\releases\stored_procs\*.sql) do (
-            sqlcmd -S prod-sql -d prodDb -U ${{ secrets.SQL_USER_PASSWORD_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            sqlcmd -S techpc -d prodDb -U ${{ secrets.SQL_USERNAME_DEV }} -P ${{ secrets.SQL_PASSWORD_DEV }} -i "%%f"
+            if errorlevel 1 (
+              echo "Failed to deploy %%f to prodDb"
+              exit /b 1
+            )
           )
