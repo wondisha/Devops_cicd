@@ -1,4 +1,4 @@
-parameters:
+-parameters:
   - name: testSqlInstance
     type: string
     default: 'techpc'  # Used for validation in the Build stage
@@ -45,7 +45,7 @@ trigger:
 
 pool:
   name: 'Default'  # Switch to the following once approved for Microsoft-hosted agents
-  # vmImage: 'windows-latest'
+  # vmImage: 'Self-Hosted'
 
 stages:
   - stage: Build
